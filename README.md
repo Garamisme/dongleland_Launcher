@@ -1,9 +1,9 @@
-# 동글랜드 모드 설치 도우미
+# 동글랜드 모드 런처
 
-동글랜드 마인크래프트 서버용 Fabric 모드 자동 설치 도구
+동글랜드 마인크래프트 서버용 Fabric 모드 자동 설치 런처
 
 ## 설치
-[Releases](https://github.com/grkim1519/dongleland-installer/releases)에서 최신 exe 다운로드
+[Releases](https://github.com/Garamisme/dongleland_Mod_Launcher/releases)에서 최신 exe 다운로드
 
 ## 기능
 - Modrinth에서 허용 모드 자동 설치/업데이트
