@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# PyInstaller build output
+build/
+dist/
+
+# 런처 사용자 설정/로그 (개발 중 로컬 실행 시 생성됨)
+config.json
+launcher.log
+*.log
+
+# 운영자 전용 DB — 절대 커밋 금지 (server_tools/README.md 원칙)
+server_tools/members.db
+
+# 에디터/OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# 테스트 의존성
+node_modules/
