@@ -1,0 +1,23 @@
+# 동글랜드 모드 설치 도우미 v2.1 - 의존성
+
+# UI: pywebview (Windows WebView2 렌더러). v2.1 에서 tkinter → HTML 로 전환.
+pywebview>=5.0
+
+# PyInstaller exe 빌드 시 SSL 인증서 검증을 위해 certifi 필요.
+# (없으면 [SSL: CERTIFICATE_VERIFY_FAILED] 발생 가능)
+certifi>=2024.0.0
+
+# v3 클라이언트 코어: MS인증(XBL/XSTS/MC 체인)·버전/Fabric 설치·커맨드 생성
+minecraft-launcher-lib>=8.0
+
+# minecraft-launcher-lib 이 사용 (v2.1 까지는 표준 라이브러리만 썼음)
+requests>=2.31
+
+
+# 빌드 도구 (개발자만 필요)
+pyinstaller>=6.0
+
+# 참고:
+#  - 런타임 로직은 Python 표준 라이브러리만 사용 (요청/설치/해시 등).
+#  - 대상 PC 에는 "WebView2 Runtime" 이 필요 (Win10/11 은 대개 기본 포함).
+#  - pywebview 는 Windows 에서 pythonnet(clr) 등을 자동으로 끌어온다.
