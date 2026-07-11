@@ -4,9 +4,9 @@
 tkinter 파일을 쓰지 않으므로 여기로 분리해 백엔드/브릿지가 공유한다.
 """
 
-APP_VERSION = "3.0.1"
+APP_VERSION = "3.1.0"
 # 릴리스 채널: "beta" 면 UI 에 베타 표식을 붙인다. 정식 배포 시 "release" 로.
-APP_CHANNEL = "release"
+APP_CHANNEL = "beta"
 
 # 약관 버전. 내용이 실질적으로 바뀌면 올린다 → 사용자에게 재동의를 받는다.
 TERMS_VERSION = "1.0"
