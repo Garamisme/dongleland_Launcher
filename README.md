@@ -8,7 +8,7 @@
 
 설치부터 접속까지, 클릭 한 번으로.
 
-<img src="https://img.shields.io/badge/version-3.0.0-6c8cff" alt="version" />
+<img src="https://img.shields.io/badge/version-3.1.0-6c8cff" alt="version" />
 <img src="https://img.shields.io/badge/Minecraft-26.1.2-3ea36a" alt="minecraft" />
 <img src="https://img.shields.io/badge/loader-Fabric-d8a531" alt="fabric" />
 <img src="https://img.shields.io/badge/platform-Windows-888" alt="platform" />
