@@ -35,11 +35,19 @@ REM  - entry point is app.py (pywebview), not mod_installer.py (old tkinter)
 REM  - bundle frontend/ (HTML + local fonts + app_icon.png) so the UI is found
 REM  - keep assets/ (icons, bundled mod jar) and certifi
 REM  - collect-all webview so pywebview backend + injected JS are included
+REM  - bundle dongleland-core.jar (Java Agent 코어 모드). 빌드 전에 이 파일이
+REM    런처 폴더에 있어야 한다 (gradle build 후 build/libs 에서 복사).
+if not exist "dongleland-core.jar" (
+    echo [WARN] dongleland-core.jar 가 없습니다 - 코어 모드 없이 빌드됩니다.
+    echo        코어 저장소에서 gradlew build 후 build\libs\dongleland-core.jar 를
+    echo        이 폴더로 복사하세요.
+)
 %PYCMD% -m PyInstaller --noconfirm --onefile --windowed ^
     --name "Dongleland_Launcher" ^
     --icon "assets/app_icon.ico" ^
     --add-data "assets;assets" ^
     --add-data "frontend;frontend" ^
+    --add-data "dongleland-core.jar;." ^
     --collect-data certifi ^
     --collect-all webview ^
     app.py
