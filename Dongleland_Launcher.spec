@@ -3,8 +3,10 @@ from PyInstaller.utils.hooks import collect_data_files
 from PyInstaller.utils.hooks import collect_all
 
 # 라이선스 고지와 약관은 배포물에 함께 포함한다 (오프라인에서도 확인 가능)
+# dongleland-core.jar: 코어 모드(Java Agent). launcher._bundled_core_jar 가 _MEIPASS 에서 찾는다.
 datas = [('assets', 'assets'), ('frontend', 'frontend'),
-         ('THIRD_PARTY_NOTICES.md', '.'), ('TERMS.md', '.')]
+         ('THIRD_PARTY_NOTICES.md', '.'), ('TERMS.md', '.'),
+         ('dongleland-core.jar', '.')]
 binaries = []
 hiddenimports = [
     # v3: api.py 가 지연 임포트하는 신규 모듈 (PyInstaller 정적 분석 누락 방지)

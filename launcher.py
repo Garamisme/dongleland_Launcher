@@ -35,6 +35,62 @@ class LaunchError(Exception):
 
 DEFAULT_MAX_MEM_MB = 4096
 
+# ── DonglelandCore (테스트베드 3.0.1) ─────────────────────────────────
+# 코어 모드(Java Agent) 주입.
+#
+# 요구: ① 우리 기능은 바닐라처럼(서버의 미허용 모드 검사에 안 잡혀야),
+#       ② 그러면서도 Fabric 로더로 다른 모드(Xaero/Iris 등)는 계속 사용.
+#
+# 해법: Fabric 프로필로 실행하되, 우리 jar 는 mods/ 에 넣지 않고 -javaagent 로만 붙인다.
+#   - fabric.mod.json 없음 + mods/ 아님 → Fabric 모드 목록에 없음 → 서버 검사 통과.
+#   - 변환은 agent(ASM)가 수행 → 어떤 로더로 로드되든 대상 메서드에 훅 삽입.
+#   - 문제: Knot 클래스로더가 시스템 클래스패스의 우리 클래스를 게임에 안 노출.
+#     해결: agent(KnotExposure)가 Fabric 공식 API addToClassPath 로 우리 jar 를 Knot
+#     클래스패스에 추가 → Knot 이 우리 클래스를 직접 로드(net.minecraft 참조 일치).
+#     이건 모드 등록이 아니므로 모드 목록에는 안 잡힌다.
+CORE_MOD_ENABLED = True
+
+
+def _bundled_core_jar() -> str | None:
+    """패키지에 번들된 dongleland-core.jar (frozen 시 _MEIPASS, dev 시 소스 폴더)."""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    jar = os.path.join(base, "dongleland-core.jar")
+    return jar if os.path.isfile(jar) else None
+
+
+def _core_mod_jar() -> str | None:
+    """실행에 쓸 코어 jar 경로.
+
+    번들 jar 를 **인스턴스 폴더에 안정 사본**으로 복사해 그 경로를 -javaagent 로 준다.
+    (onefile PyInstaller 의 임시 _MEIPASS 는 런처 종료 시 삭제되므로, 게임이 실행 중
+     그 경로를 계속 참조하면 클래스 로드가 끊긴다. 인스턴스 폴더 사본은 안정적.)
+    mods/ 가 아니라 인스턴스 루트에 두므로 Fabric 모드 목록엔 안 잡힌다.
+    """
+    src = _bundled_core_jar()
+    if not src:
+        return None
+    import shutil
+    dest = os.path.join(instance.instance_dir(), "dongleland-core.jar")
+    try:
+        if (not os.path.isfile(dest)
+                or os.path.getsize(dest) != os.path.getsize(src)):
+            os.makedirs(instance.instance_dir(), exist_ok=True)
+            shutil.copyfile(src, dest)
+        return dest
+    except Exception:
+        return src  # 복사 실패 시 원본 경로 폴백 (onedir 에선 안정적)
+
+
+def _core_mod_jvm_args() -> list[str]:
+    """agent 주입 JVM 인자. 로그/설정(mod_config.json)은 인스턴스 폴더에 둔다."""
+    if not CORE_MOD_ENABLED:
+        return []
+    jar = _core_mod_jar()
+    if not jar:
+        return []
+    return [f"-javaagent:{jar}", f"-Ddongleland.dir={instance.instance_dir()}"]
+# ──────────────────────────────────────────────────────────────────────
+
 
 def _java_executable() -> str:
     """실행에 쓸 java 경로.
@@ -77,6 +133,8 @@ def _java_executable() -> str:
 def build_command(account: dict, *, quick_connect: bool = True,
                   max_mem_mb: int = DEFAULT_MAX_MEM_MB) -> list[str]:
     """실행 커맨드 조립 (실행은 안 함 — 테스트 가능하도록 분리)."""
+    # Fabric 프로필로 실행 (다른 Fabric 모드가 로드되도록). 우리 모드는 -javaagent 로만
+    # 붙어 모드 목록에는 없다. (build_command 는 순수 함수 — 실행/배치는 launch 에서.)
     version_id = instance.installed_version_id()
     if not version_id or not instance.is_version_ready(version_id):
         raise LaunchError("게임이 설치되지 않았습니다.\n먼저 설치를 진행해주세요.",
@@ -87,7 +145,7 @@ def build_command(account: dict, *, quick_connect: bool = True,
         "uuid": account["mc_uuid"],
         "token": account["mc_access_token"],
         "executablePath": _java_executable(),
-        "jvmArguments": [f"-Xmx{max_mem_mb}M"],
+        "jvmArguments": [f"-Xmx{max_mem_mb}M", *_core_mod_jvm_args()],
         "launcherName": "DonglelandClient",
         "launcherVersion": app_meta.APP_VERSION,
         "gameDirectory": instance.instance_dir(),
