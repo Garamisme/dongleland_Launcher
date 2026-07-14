@@ -1067,3 +1067,43 @@ auth.py 의 _TENANT 는 이미 "consumers" (개인 MS 계정 전용).
 Azure 앱 등록이 "모든 Entra ID 테넌트 + 개인 계정" 으로 되어 있어도 동작에는 문제없지만,
 Minecraft 는 개인 계정으로만 소유하므로 Azure 쪽도 개인 계정 전용으로 좁히는 편이 안전하다.
 (_TENANT 를 common 으로 바꾸면 회사 계정 사용자가 로그인 성공 후 Xbox 단계에서 실패한다)
+
+## 3.1.0 사용자 WinError 2 — 게임 설치 실패 (37단계 · 3.1.1)
+3.1.0 사용자 제보: WinError 2 로 게임을 못 함. 보낸 로그(log(1).txt)에는 약관 동의
++ 모드 설치/제거만 있고 게임 설치·실행 흔적이 전혀 없었다.
+
+원인: mll 의 `fabric.install_fabric()` 은 Fabric 설치 프로그램(jar)을 실행할 때
+`java=` 인자를 안 주면 시스템 PATH 의 맨 `"java"` 를 존재 확인 없이 그대로
+`subprocess.run` 에 넘긴다(`minecraft_launcher_lib/fabric.py:211`).
+`game_installer.install()` 은 그 인자를 넘긴 적이 없었다. 시스템에 Java 가 없는
+첫 사용자는 — 이 런처가 Mojang 런타임을 인스턴스 폴더에 자동으로 내려받았음에도 —
+그 런타임이 PATH 에 없으니 Fabric 설치 프로그램이 `java` 를 못 찾아
+`FileNotFoundError`(WinError 2) 로 **게임 설치가 죽었다**. 모드는 게임 설치와
+무관한 순수 다운로드라 성공했다(그래서 로그에 모드만 보였다).
+
+로그가 원인을 못 보여준 이유: 이 빌드의 launcher/game_installer/auth 에 `write_log`
+호출이 0개였다(로그의 `[설치성공]` 은 전부 api.py 의 **모드** 설치).
+
+근본 해결(PATH 의존 완전 제거):
+- `game_installer._resolve_installer_java(mc_version, mc_dir)` 신설: 이 버전의
+  Mojang 런타임 절대경로를 최우선(항상 존재), 없으면 `shutil.which("java")`,
+  그마저 없으면 None. **맨 "java" 문자열을 subprocess 로 흘리지 않는다.**
+- `install()`: `install_minecraft_version()` 으로 바닐라+런타임을 먼저 확보한 뒤
+  그 경로를 `install_fabric(..., java=...)` 로 넘긴다. (install_fabric 내부의
+  재호출은 sha1 일치라 재다운로드 없음)
+- `update_loader()`: 동일하게 `java=` 전달.
+- `launcher._java_executable()`: PATH 폴백이 맨 `"javaw"` 를 반환하던 같은 계열
+  버그도 수정 — `shutil.which("javaw")`→`which("java")`→`LaunchError(no_java)`.
+- `launcher.launch()`: Popen 직전 exe(절대/ PATH 분기)와 cwd 존재를 각각 확인해
+  어느 쪽 문제인지 로그에 남기고, 실행/종료(exit_code, `_exit_logged` 로 1회)를 기록.
+- game_installer 설치/검증/런타임 단계에 `write_log` 추가.
+  (auth.py 는 WinError 2 경로와 무관 → 이번엔 손대지 않음)
+
+검증: `tests/run_all.py` 의 백엔드 컴파일(12개)·프론트↔api 계약(67) 통과.
+JS/jsdom 스위트는 이 PC 에 Node 미설치라 실행 못 함(백엔드 변경과 무관).
+`_resolve_installer_java`·`_java_executable` 3분기를 스텁 임포트로 직접 검증.
+`py -m PyInstaller ... app.py` onefile 빌드 성공 → `dist/Dongleland_Launcher.exe`
+(20.7MB, dongleland-core.jar 번들 포함 확인). app_meta.APP_VERSION → 3.1.1.
+
+⚠️ 남은 한계: 실제 "PATH 에 Java 없는 PC" 에서의 최종 재현 검증은 이 개발
+환경에선 불가능(여기엔 Java 존재). 로직 단위 검증까지만 완료.

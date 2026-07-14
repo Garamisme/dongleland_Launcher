@@ -23,3 +23,6 @@ Thumbs.db
 
 # 테스트 의존성
 node_modules/
+
+# 테스트가 생성하는 임시 산출물 (run_all.py 가 매번 재생성)
+tests/_plain.js

@@ -15,6 +15,7 @@ Java 는 preflight.find_valid_java() 재사용 (HANDOFF §5.4 — 핵심 자산)
 """
 
 import os
+import shutil
 import subprocess
 import sys
 
@@ -121,8 +122,23 @@ def _java_executable() -> str:
             "게임을 다시 실행하면 자동으로 내려받습니다.",
             code="no_java")
     java = info["path"] if isinstance(info, dict) else info
+
     if java == "java":
-        return "javaw" if sys.platform == "win32" else "java"
+        # PATH 에서 찾은 경우. java.exe 는 있어도 javaw.exe 는 없을 수 있다
+        # (일부 JRE, Scoop/Chocolatey 처럼 java 만 PATH 에 노출하는 배포).
+        # 존재를 확인하지 않고 "javaw" 를 넘기면 Popen 이 WinError 2 로 죽는다.
+        if sys.platform == "win32":
+            javaw = shutil.which("javaw")
+            if javaw:
+                return javaw
+            java_exe = shutil.which("java")
+            if java_exe:
+                return java_exe
+            raise LaunchError(
+                "게임 실행에 필요한 Java 를 찾을 수 없습니다.\n"
+                "게임을 다시 실행하면 자동으로 내려받습니다.",
+                code="no_java")
+        return "java"
     if sys.platform == "win32" and os.path.basename(java).lower().startswith("java"):
         javaw = os.path.join(os.path.dirname(java), "javaw.exe")
         if os.path.isfile(javaw):
@@ -159,6 +175,7 @@ def build_command(account: dict, *, quick_connect: bool = True,
 
 
 _running_proc = None  # 마지막으로 실행한 게임 프로세스 (실행중 여부 확인용)
+_exit_logged = False  # 종료 로그 중복 방지 (프론트가 5초마다 폴링하므로)
 
 
 def launch(*, quick_connect: bool = True,
@@ -168,7 +185,7 @@ def launch(*, quick_connect: bool = True,
     반환: {"ok":True, "pid":int, "version_id":str, "username":str}
     실패: LaunchError / auth.AuthError
     """
-    global _running_proc
+    global _running_proc, _exit_logged
     account = auth.get_account()  # 만료 시 자동 리프레시, 불가 시 AuthError(relogin)
     cmd = build_command(account, quick_connect=quick_connect,
                         max_mem_mb=max_mem_mb)
@@ -178,12 +195,50 @@ def launch(*, quick_connect: bool = True,
         # 런처와 분리된 독립 프로세스 + 콘솔창 없이
         kwargs["creationflags"] = (
             subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+
+    # WinError 2("지정된 파일을 찾을 수 없습니다")는 실행 파일이 없을 때와
+    # cwd 가 없을 때 '똑같이' 난다. Windows 는 어느 쪽인지 알려주지 않으므로
+    # 미리 구분해 두어야 사용자도 우리도 원인을 안다.
+    exe = cmd[0] if cmd else ""
+    if not exe:
+        raise LaunchError("실행 커맨드를 만들지 못했습니다.", code="bad_command")
+
+    if os.path.sep in exe or (sys.platform == "win32" and ":" in exe):
+        if not os.path.isfile(exe):
+            preflight.write_log(f"[실행실패] Java 실행 파일 없음: {exe}")
+            raise LaunchError(
+                "Java 실행 파일을 찾을 수 없습니다.\n"
+                "설정에서 게임 파일을 복구하거나, 게임을 다시 설치해주세요.",
+                code="no_java")
+    elif not shutil.which(exe):
+        preflight.write_log(f"[실행실패] PATH 에 {exe} 없음")
+        raise LaunchError(
+            "게임 실행에 필요한 Java 를 찾을 수 없습니다.\n"
+            "게임을 다시 실행하면 자동으로 내려받습니다.",
+            code="no_java")
+
+    if not os.path.isdir(kwargs["cwd"]):
+        preflight.write_log(f"[실행실패] 인스턴스 폴더 없음: {kwargs['cwd']}")
+        raise LaunchError(
+            "게임 폴더를 찾을 수 없습니다.\n설정에서 게임을 다시 설치해주세요.",
+            code="no_instance")
+
     try:
         proc = subprocess.Popen(cmd, **kwargs)
+    except FileNotFoundError as e:
+        preflight.write_log(f"[실행실패] FileNotFoundError: exe={exe} cwd={kwargs['cwd']} ({e})")
+        raise LaunchError(
+            "게임 실행 파일을 찾을 수 없습니다.\n설정에서 게임 파일을 복구해주세요.",
+            code="no_java")
     except Exception as e:
+        preflight.write_log(f"[실행실패] {type(e).__name__}: {e}")
         raise LaunchError(f"게임 프로세스 실행에 실패했습니다:\n{e}")
 
     _running_proc = proc
+    _exit_logged = False
+    preflight.write_log(
+        f"[실행] java={exe} version={instance.installed_version_id()} "
+        f"mem={max_mem_mb}MB pid={proc.pid}")
     return {"ok": True, "pid": proc.pid,
             "version_id": instance.installed_version_id(),
             "username": account["mc_username"]}
@@ -191,11 +246,15 @@ def launch(*, quick_connect: bool = True,
 
 def is_game_running() -> bool:
     """마지막으로 실행한 게임 프로세스가 아직 살아있는지."""
-    global _running_proc
+    global _running_proc, _exit_logged
     if _running_proc is None:
         return False
     # poll() 이 None 이면 아직 실행 중, 아니면 종료됨(종료코드 반환)
-    if _running_proc.poll() is None:
+    rc = _running_proc.poll()
+    if rc is None:
         return True
+    if not _exit_logged:
+        _exit_logged = True
+        preflight.write_log(f"[종료] exit_code={rc}")
     _running_proc = None
     return False

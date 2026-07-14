@@ -15,11 +15,13 @@
 """
 
 import os
+import shutil
 import sys
 import threading
 
 import app_meta
 import instance
+import preflight
 
 from minecraft_launcher_lib import fabric as _fabric
 from minecraft_launcher_lib import install as _install
@@ -212,6 +214,7 @@ def install(on_progress=None) -> dict:
     _assert_installable()
     mc_version = app_meta.GAME_VERSION
     mc_dir = instance.ensure_dirs()
+    preflight.write_log(f"[설치] 시작 mc_version={mc_version}")
 
     # 0) 대상 버전이 Mojang 매니페스트에 실재하는지 선확인 (오타/미출시 방지)
     try:
@@ -235,33 +238,47 @@ def install(on_progress=None) -> dict:
     except Exception as e:
         raise InstallError(f"Fabric 메타 조회에 실패했습니다:\n{e}")
 
-    # 2) Fabric 설치 — mll 의 install_fabric 이 내부에서
-    #    바닐라(install_minecraft_version)까지 함께 설치한다.
-    #    (버전 JSON 상속 구조라 별도 바닐라 설치 호출 불필요)
+    # 2) Fabric 설치.
+    #    ⚠️ 근본 원인(WinError 2): mll 의 install_fabric 은 Fabric 설치 프로그램(jar)을
+    #       실행할 때 java= 인자를 안 주면 시스템 PATH 의 맨 "java" 를 존재 확인 없이
+    #       그대로 subprocess 에 넘긴다(minecraft_launcher_lib/fabric.py). 시스템에
+    #       Java 가 전혀 없는 첫 사용자는 여기서 FileNotFoundError(WinError 2)로 죽는다.
+    #       → 바닐라를 먼저 우리가 설치해 Mojang 런타임을 확보하고, 그 절대경로를
+    #         java= 로 넘겨 PATH 의존을 완전히 제거한다.
+    #    (install_fabric 도 내부에서 install_minecraft_version 을 다시 부르지만
+    #     sha1 이 일치하므로 재다운로드 없이 즉시 통과한다.)
     # 설치 진행은 0~99% 까지만. 100% 는 아래 검증을 통과한 뒤에만 내보낸다.
     cb = _make_callback(on_progress, base=0, span=99)
     try:
+        _install.install_minecraft_version(mc_version, mc_dir, callback=cb)
+        java = _resolve_installer_java(mc_version, mc_dir)
+        preflight.write_log(f"[설치] Fabric 설치 프로그램 java={java or '(PATH)'}")
         _fabric.install_fabric(
-            mc_version, mc_dir, loader_version=loader_version, callback=cb)
+            mc_version, mc_dir, loader_version=loader_version, callback=cb, java=java)
     except InstallCancelled:
+        preflight.write_log("[설치] 사용자 취소")
         raise
     except Exception as e:
         text = str(e)
         # 설치 도중 게임이 켜져 파일이 잠긴 경우 (FileSystemException / PermissionError)
         if ("다른 프로세스" in text or "being used by another process" in text
                 or "FileSystemException" in text or isinstance(e, PermissionError)):
+            preflight.write_log(f"[설치실패] 파일 사용 중: {e}")
             raise InstallError(
                 "게임 파일이 사용 중이라 설치를 마치지 못했습니다.\n"
                 "실행 중인 마인크래프트를 완전히 종료한 뒤 다시 시도해주세요.")
+        preflight.write_log(f"[설치실패] {type(e).__name__}: {e}")
         raise InstallError(f"게임 파일 다운로드에 실패했습니다:\n{e}\n"
                            "네트워크 상태를 확인한 뒤 다시 시도해주세요.")
 
     version_id = fabric_version_id(loader_version, mc_version)
     # 실제로 실행 가능한 상태인지 검증한 뒤에야 '완료' 로 본다.
     if not instance.is_version_ready(version_id):
+        preflight.write_log(f"[설치실패] 검증 실패: {version_id}")
         raise InstallError("설치가 완료되지 않았습니다 (버전 파일 누락). 다시 시도해주세요.")
 
     instance.set_installed_version_id(version_id, mc_version, loader_version)
+    preflight.write_log(f"[설치완료] version_id={version_id}")
     # 여기서만 100% (검증 통과 = 게임 실행 가능)
     if on_progress:
         try:
@@ -293,9 +310,11 @@ def verify_and_repair(on_progress=None) -> dict:
     if not version_id:
         raise InstallError("게임이 설치되어 있지 않습니다. 먼저 게임을 설치해주세요.")
 
+    preflight.write_log(f"[검증] 시작 version_id={version_id}")
     mc_dir = instance.instance_dir()
     json_path = os.path.join(mc_dir, "versions", version_id, f"{version_id}.json")
     if not os.path.isfile(json_path):
+        preflight.write_log(f"[검증실패] 버전 정보 없음: {json_path}")
         raise InstallError("게임 파일이 손상되었습니다 (버전 정보 없음).\n"
                            "게임을 다시 설치해주세요.")
 
@@ -314,21 +333,26 @@ def verify_and_repair(on_progress=None) -> dict:
     try:
         _install.install_minecraft_version(version_id, mc_dir, callback=cb)
     except InstallCancelled:
+        preflight.write_log("[검증] 사용자 취소")
         raise
     except Exception as e:
         text = str(e)
         if ("다른 프로세스" in text or "being used by another process" in text
                 or "FileSystemException" in text or isinstance(e, PermissionError)):
+            preflight.write_log(f"[검증실패] 파일 사용 중: {e}")
             raise InstallError(
                 "게임 파일이 사용 중이라 검증하지 못했습니다.\n"
                 "실행 중인 마인크래프트를 완전히 종료한 뒤 다시 시도해주세요.")
+        preflight.write_log(f"[검증실패] {type(e).__name__}: {e}")
         raise InstallError(f"게임 파일 검증에 실패했습니다:\n{e}\n"
                            "네트워크 상태를 확인한 뒤 다시 시도해주세요.")
 
     if not instance.is_version_ready(version_id):
+        preflight.write_log(f"[검증실패] 필수 파일 누락: {version_id}")
         raise InstallError("게임 파일 검증에 실패했습니다 (필수 파일 누락).\n"
                            "게임을 다시 설치해주세요.")
 
+    preflight.write_log(f"[검증완료] version_id={version_id} repaired={downloaded['n']>0} files={downloaded['n']}")
     if on_progress:
         try:
             on_progress(100, "검증 완료", {"stage":"완료","stage_no":4,"stage_total":4,"cur":0,"max":0,"raw":"done"})
@@ -368,6 +392,25 @@ def runtime_info() -> dict:
             "installed": bool(path), "path": path}
 
 
+def _resolve_installer_java(mc_version: str, mc_dir: str) -> str | None:
+    """Fabric 설치 프로그램(jar)을 실행할 Java 경로.
+
+    근본 해결: 시스템 PATH 에 의존하지 않는다. 방금 확보한 이 버전의 Mojang
+    런타임을 최우선으로 쓴다(시스템에 Java 가 전혀 없어도 항상 존재). 못 구하면
+    존재가 검증된 시스템 java 로 폴백하고, 그마저 없으면 None 을 반환해 mll 이
+    명확한 에러로 드러내게 둔다.
+    """
+    try:
+        info = _runtime.get_version_runtime_information(mc_version, mc_dir)
+        if info:
+            path = _runtime.get_executable_path(info["name"], mc_dir)
+            if path and os.path.isfile(path):
+                return path
+    except Exception:
+        pass
+    return shutil.which("java")
+
+
 def java_executable() -> str | None:
     """인스턴스에 설치된 Mojang 런타임의 실행 파일 경로.
 
@@ -396,12 +439,15 @@ def ensure_runtime(on_progress=None) -> dict:
         return ri
     if ri.get("installed"):
         return ri
+    preflight.write_log(f"[런타임설치] 시작 name={ri.get('name')} major={ri.get('major')}")
     mc_dir = instance.instance_dir()
     cb = _make_callback(on_progress, base=0, span=99)
     try:
         _runtime.install_jvm_runtime(ri["name"], mc_dir, callback=cb)
     except Exception as e:
+        preflight.write_log(f"[런타임설치실패] {type(e).__name__}: {e}")
         raise InstallError(f"Java 런타임 설치에 실패했습니다:\n{e}")
+    preflight.write_log(f"[런타임설치완료] name={ri.get('name')} major={ri.get('major')}")
     if on_progress:
         try:
             on_progress(100, "Java 준비 완료", {"stage":"완료","stage_no":4,"stage_total":4,"cur":0,"max":0,"raw":"done"})
@@ -467,9 +513,12 @@ def update_loader(on_progress=None) -> dict:
                 "unchanged": True}
 
     cb = _make_callback(on_progress, base=0, span=99)
+    # 근본 원인 동일 (install() 주석 참고): 기존 설치가 있으므로 런타임은 이미
+    # 존재 → 그 절대경로를 java= 로 넘겨 PATH 의존 제거.
+    java = _resolve_installer_java(mc_version, mc_dir)
     try:
         _fabric.install_fabric(
-            mc_version, mc_dir, loader_version=new_loader, callback=cb)
+            mc_version, mc_dir, loader_version=new_loader, callback=cb, java=java)
     except InstallCancelled:
         raise
     except Exception as e:
