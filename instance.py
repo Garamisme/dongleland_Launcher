@@ -51,6 +51,10 @@ def shaderpacks_dir() -> str:
     return os.path.join(instance_dir(), "shaderpacks")
 
 
+def resourcepacks_dir() -> str:
+    return os.path.join(instance_dir(), "resourcepacks")
+
+
 def account_path() -> str:
     """[구] 단일 계정 파일 (마이그레이션 원본)."""
     return os.path.join(root_dir(), "account.dat")
@@ -67,8 +71,9 @@ def state_path(profile_id: str = DEFAULT_PROFILE) -> str:
 
 
 def ensure_dirs() -> str:
-    """루트/인스턴스/mods/shaderpacks 디렉토리 생성. 인스턴스 경로 반환."""
-    for d in (root_dir(), instance_dir(), mods_dir(), shaderpacks_dir()):
+    """루트/인스턴스/mods/shaderpacks/resourcepacks 디렉토리 생성. 인스턴스 경로 반환."""
+    for d in (root_dir(), instance_dir(), mods_dir(), shaderpacks_dir(),
+              resourcepacks_dir()):
         os.makedirs(d, exist_ok=True)
     return instance_dir()
 

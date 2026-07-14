@@ -224,6 +224,117 @@ class Api:
         except Exception as e:
             return {"ok": False, "message": f"폴더를 열 수 없습니다: {e}"}
 
+    # ── 리소스팩 (v3.1.x 리소스팩 탭) ─────────────────────────────────────
+    def list_resourcepacks(self):
+        """인스턴스 resourcepacks 폴더의 팩 목록.
+        반환: {"ok":True,"packs":[{name,filename,size,kind}]}"""
+        import instance
+        d = instance.resourcepacks_dir()
+        packs = []
+        try:
+            os.makedirs(d, exist_ok=True)
+            for entry in sorted(os.listdir(d)):
+                p = os.path.join(d, entry)
+                if os.path.isfile(p) and entry.lower().endswith(".zip"):
+                    packs.append({"name": os.path.splitext(entry)[0],
+                                  "filename": entry,
+                                  "size": os.path.getsize(p), "kind": "zip"})
+                elif os.path.isdir(p) and os.path.isfile(os.path.join(p, "pack.mcmeta")):
+                    packs.append({"name": entry, "filename": entry,
+                                  "size": 0, "kind": "folder"})
+            return {"ok": True, "packs": packs}
+        except Exception as e:
+            return {"ok": False, "message": str(e), "packs": []}
+
+    def open_resourcepacks_folder(self):
+        """resourcepacks 폴더를 탐색기로 연다 (격리 인스턴스)."""
+        import instance
+        d = instance.resourcepacks_dir()
+        try:
+            os.makedirs(d, exist_ok=True)
+            os.startfile(d)
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "message": f"폴더를 열 수 없습니다: {e}"}
+
+    def add_resourcepack_data(self, filename, data_b64):
+        """모달에서 드래그드롭한 리소스팩(zip, base64)을 폴더에 저장.
+
+        검증: 마인크래프트가 인식하려면 zip 최상위에 pack.mcmeta 가 있어야 한다.
+        없으면 거부하고 원인을 안내한다(폰트 파일 묶음이면 '폰트 생성' 유도).
+        반환: {"ok":True,"name","filename"} / 실패 {"ok":False,"message"}"""
+        try:
+            import base64
+            import io
+            import zipfile
+
+            import instance
+            base = os.path.basename(filename or "").strip()
+            if not base.lower().endswith(".zip"):
+                return {"ok": False, "message": "zip 파일만 추가할 수 있습니다."}
+            raw = base64.b64decode(data_b64)
+            try:
+                with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                    names = zf.namelist()
+            except zipfile.BadZipFile:
+                return {"ok": False, "message": "올바른 zip 파일이 아닙니다."}
+            # 유효한 리소스팩 = 루트에 pack.mcmeta
+            if "pack.mcmeta" not in names:
+                if any(n.lower().endswith((".ttf", ".otf")) for n in names):
+                    return {"ok": False,
+                            "message": "이 zip 은 리소스팩이 아니라 폰트 파일 묶음입니다.\n"
+                                       "폰트를 쓰려면 '폰트 생성' 으로 .ttf 파일 하나를 넣어 "
+                                       "리소스팩을 만들어주세요."}
+                if any(n.endswith("/pack.mcmeta") for n in names):
+                    return {"ok": False,
+                            "message": "리소스팩 구조가 잘못되었습니다.\n"
+                                       "pack.mcmeta 가 zip 최상위가 아니라 하위 폴더에 있습니다."}
+                return {"ok": False, "message": "리소스팩이 아닙니다 (pack.mcmeta 가 없습니다)."}
+            d = instance.resourcepacks_dir()
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, base), "wb") as fh:
+                fh.write(raw)
+            return {"ok": True, "name": os.path.splitext(base)[0], "filename": base}
+        except Exception as e:
+            return {"ok": False, "message": str(e)}
+
+    def delete_resourcepack(self, filename):
+        """리소스팩(zip 파일 또는 폴더)을 resourcepacks 폴더에서 제거."""
+        try:
+            import shutil
+
+            import instance
+            base = os.path.basename(filename or "")
+            if not base:
+                return {"ok": False, "message": "잘못된 파일명입니다."}
+            p = os.path.join(instance.resourcepacks_dir(), base)
+            if os.path.isfile(p):
+                os.remove(p)
+            elif os.path.isdir(p):
+                shutil.rmtree(p)
+            else:
+                return {"ok": True, "status": "not_found"}
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "message": str(e)}
+
+    def generate_font_pack(self, filename, data_b64):
+        """ttf(base64) 로 폰트 리소스팩을 만들어 resourcepacks 폴더에 저장.
+        프론트 폰트 생성 모달이 드래그드롭한 ttf 를 base64 로 넘긴다.
+        반환: {"ok":True,"name","filename"} / 실패 {"ok":False,"message"}"""
+        try:
+            import base64
+
+            import fontpack
+            import instance
+            raw = base64.b64decode(data_b64)
+            path = fontpack.build_font_pack(raw, filename, instance.resourcepacks_dir())
+            return {"ok": True,
+                    "name": os.path.splitext(os.path.basename(path))[0],
+                    "filename": os.path.basename(path)}
+        except Exception as e:
+            return {"ok": False, "message": str(e)}
+
     def open_release_page(self):
         """앱 릴리스 페이지(GitHub)를 기본 브라우저로 연다.
         업데이트 모달/버전 행의 '업데이트'에서 호출 → 유저가 새 버전을 직접 받음."""

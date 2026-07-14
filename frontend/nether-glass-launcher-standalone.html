@@ -270,6 +270,10 @@ main{flex:1;min-width:0;min-height:0;position:relative;display:flex;flex-directi
 .eyebrow{font-size:var(--text-2xs);letter-spacing:var(--ls-caps);text-transform:uppercase;color:var(--text-faint);font-weight:700}
 .page-h1{font-family:var(--font-display);font-size:var(--text-3xl);font-weight:700;color:var(--text-strong);letter-spacing:var(--ls-display)}
 .page-sub{color:var(--text-muted);font-size:var(--text-sm);margin-top:2px}
+.ct-name{font-family:var(--font-display);font-weight:700;letter-spacing:var(--ls-display);background:none;border:none;padding:0;cursor:pointer;line-height:1.1;
+  font-size:var(--text-lg);color:var(--text-faint);transition:font-size .28s var(--ease-glass),color .28s,opacity .28s}
+.ct-name:hover{color:var(--text-muted)}
+.ct-name[data-active="true"]{font-size:var(--text-3xl);color:var(--text-strong);cursor:default}
 
 /* search */
 .search{display:flex;align-items:center;gap:10px;height:var(--control-h);min-height:var(--hit-min);padding:0 12px 0 14px;border-radius:999px;
@@ -509,6 +513,7 @@ input[type=range]{width:100%;accent-color:var(--grass-500);height:6px}
   <div id="update-modal-root"></div>
   <div id="gate-root"></div>
   <div id="skin-modal-root"></div>
+  <div id="rp-modal-root"></div>
   <div class="toast" id="toast"><div class="inner"><span class="d"></span><span id="toast-msg"></span></div></div>
 </div>
 
@@ -670,7 +675,7 @@ function bgFor(url, grad){
 }
 
 /* ================= STATE ================= */
-const NAV_ORDER=["play","mods","shaders","skin","library","system"];
+const NAV_ORDER=["play","skin","resourcepacks","mods","shaders","library","system"];
 const state={
   nav:"play", prevNav:"play",
   theme: localStorage.getItem("ng-theme") || "dark",
@@ -697,6 +702,10 @@ const state={
   reinstallArmed:false, // 게임 재설치 2단계 확인
   client:null,          // {installed,installing,version_id,mc_version,loader_version}
   clientPct:0, clientMsg:"",  // 설치 진행률 표시
+  contentKind:"mods",   // '콘텐츠' 탭 내부 선택 (모드/셰이더팩 통합 탭)
+  resourcepacks:null,   // 리소스팩 목록 [{name,filename,size,kind}] (null=미로드)
+  resourcepacksLoaded:false,
+  rpModal:null,         // 리소스팩 모달 {mode:"font"|"zip", file:{name,b64}|null, busy}
   skin:null,            // 현재 적용된 스킨 {variant,url,default} — 3D 뷰어용
   skinLib:{used_id:null,items:[]}, // 스킨 라이브러리
   skinCapes:[],         // 계정 보유 망토 [{id,name,active}]
@@ -749,7 +758,14 @@ function modCardHTML(m,kind){
   +'</div>';
 }
 
-function browseScreen(kind){
+function contentSub(kind){ return kind==="shaders"?"Iris 셰이더팩을 설치하고 관리하세요":"모드를 검색·설치하고 최신으로 유지하세요"; }
+function contentToolsHTML(kind){
+  return '<div class="search" style="width:280px">'+ic("search",18)+'<input id="search-input" placeholder="'+(kind==="shaders"?"셰이더팩":"모드")+' 검색…" value="'+esc(state.q||"")+'"/></div>'
+    +(kind==="shaders"
+      ? '<button class="btn" data-act="shader-folder"'+((Bridge.live && state.shaderReady && !state.shaderReady.folder)?' disabled title="Iris 설치 후 마크 1회 실행 필요"':'')+'>'+ic("folder-open",18)+'폴더</button>'
+      : '<button class="btn" data-act="mods-folder">'+ic("folder-open",18)+'폴더</button>');
+}
+function contentBodyHTML(kind){
   const items = kind==="shaders"?DATA.shaders:DATA.mods;
   const q=(state.q||"").toLowerCase();
   const filtered=items.filter(m=>{
@@ -757,31 +773,46 @@ function browseScreen(kind){
       || (kind==="shaders" ? (m._cats && m._cats.includes(state.cat)) : m.cat===state.cat);
     return catOk && (q===""||m.title.toLowerCase().includes(q));
   });
-  const title=kind==="shaders"?"셰이더팩":"모드";
-  const sub=kind==="shaders"?"Iris 셰이더팩을 설치하고 관리하세요":"모드를 검색·설치하고 최신으로 유지하세요";
   const shaderLoading = kind==="shaders" && Bridge.live && !state.shadersLoaded;
-  let gridInner = shaderLoading
+  const notice=(kind==="shaders" && Bridge.live && state.shaderReady && !state.shaderReady.ready)
+    ? '<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:18px;padding:12px 14px;border-radius:10px;background:var(--tint-gold-fill,rgba(244,193,60,.1));border:1px solid var(--tint-gold-edge,rgba(244,193,60,.3));color:var(--tint-gold-text,#b8860b);font-size:var(--text-sm)">'+ic("alert-triangle",16)+'<span>'+esc(state.shaderReady.reason)+' 그때까지 설치가 제한됩니다.</span></div>'
+    : '';
+  const gridInner = shaderLoading
     ? '<div style="text-align:center;color:var(--text-muted);padding:64px 0;font-size:var(--text-md)">셰이더 목록을 불러오는 중…</div>'
     : (filtered.length===0
     ? '<div style="text-align:center;color:var(--text-muted);padding:64px 0;font-size:var(--text-md)">“'+esc(state.q||"")+'”에 해당하는 '+(kind==="shaders"?"셰이더팩":"모드")+'이 없습니다.</div>'
     : '<div class="grid" id="mod-grid">'+filtered.map(m=>modCardHTML(m,kind)).join("")+'</div>');
+  return notice+gridInner;
+}
+function browseScreen(kind){
   return '<div style="padding:24px">'
     +'<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:20px;flex-wrap:wrap">'
-      +'<div><h1 class="page-h1">'+title+'</h1><div class="page-sub">'+sub+'</div></div>'
-      +'<div style="display:flex;gap:10px;align-items:center">'
-        +'<div class="search" style="width:280px">'+ic("search",18)+'<input id="search-input" placeholder="'+(kind==="shaders"?"셰이더팩":"모드")+' 검색…" value="'+esc(state.q||"")+'"/></div>'
-        +(kind==="shaders"
-          ? '<button class="btn" data-act="shader-folder"'+((Bridge.live && state.shaderReady && !state.shaderReady.folder)?' disabled title="Iris 설치 후 마크 1회 실행 필요"':'')+'>'+ic("folder-open",18)+'폴더</button>'
-          : '<button class="btn" data-act="mods-folder">'+ic("folder-open",18)+'폴더</button>')
-      +'</div>'
+      +'<div><div style="display:flex;align-items:baseline;gap:16px">'
+        +'<button class="ct-name" data-content="mods" data-active="'+(kind==="mods")+'">모드</button>'
+        +'<button class="ct-name" data-content="shaders" data-active="'+(kind==="shaders")+'">셰이더팩</button>'
+      +'</div><div class="page-sub" id="content-sub">'+contentSub(kind)+'</div></div>'
+      +'<div id="content-tools" style="display:flex;gap:10px;align-items:center">'+contentToolsHTML(kind)+'</div>'
     +'</div>'
-    +((kind==="shaders" && Bridge.live && state.shaderReady && !state.shaderReady.ready)
-      ? '<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:18px;padding:12px 14px;border-radius:10px;background:var(--tint-gold-fill,rgba(244,193,60,.1));border:1px solid var(--tint-gold-edge,rgba(244,193,60,.3));color:var(--tint-gold-text,#b8860b);font-size:var(--text-sm)">'+ic("alert-triangle",16)+'<span>'+esc(state.shaderReady.reason)+' 그때까지 설치가 제한됩니다.</span></div>'
-      : '')
-    +gridInner
+    +'<div id="content-body">'+contentBodyHTML(kind)+'</div>'
   +'</div>';
 }
 
+/* 콘텐츠 탭 내 모드⇄셰이더팩 전환: 제목(.ct-name)은 유지해 크기가 부드럽게 바뀌고,
+   나머지(부제/도구/카테고리/그리드)만 제자리 교체한다. 전체 슬라이드는 안 쓴다. */
+function contentSwitch(kind){
+  if(state.nav===kind) return;
+  state.prevNav=state.nav; state.nav=kind; state.contentKind=kind; state.cat="all"; state.q="";
+  renderSidebar();
+  document.querySelectorAll('.ct-name').forEach(b=>b.setAttribute('data-active', b.getAttribute('data-content')===kind));
+  const sub=document.getElementById("content-sub"); if(sub) sub.textContent=contentSub(kind);
+  const tools=document.getElementById("content-tools"); if(tools) tools.innerHTML=contentToolsHTML(kind);
+  renderCatbar();
+  const body=document.getElementById("content-body"); if(body) body.innerHTML=contentBodyHTML(kind);
+  // 셰이더 첫 진입 lazy-load (완료 시 자체적으로 다시 그린다)
+  if(kind==="shaders" && Bridge.live && (!state.shadersLoaded || DATA.shaders.length===0)){ loadShaders(); }
+  else if(kind==="shaders" && Bridge.live){ refreshShaderStatuses(); }
+  if(kind==="shaders" && Bridge.live){ loadShaderReady(); }
+}
 function serverTileHTML(){
   const s=state.server;
   let value, color, sub;
@@ -913,11 +944,118 @@ function screenHTML(){
     case "play":return playScreen();
     case "mods":return browseScreen("mods");
     case "shaders":return browseScreen("shaders");
+    case "resourcepacks":return resourcepacksScreen();
     case "skin":return skinScreen();
     case "library":return libraryScreen();
     case "system":return systemScreen();
   }
   return "";
+}
+
+/* ================= RESOURCEPACKS ================= */
+function fmtBytes(n){ if(!n) return ""; if(n<1024) return n+" B"; if(n<1048576) return (n/1024).toFixed(0)+" KB"; return (n/1048576).toFixed(1)+" MB"; }
+function rpRow(p){
+  const meta=(p.kind==="zip"?"리소스팩":"폴더")+(p.size?" · "+fmtBytes(p.size):"");
+  return '<div class="librow" style="cursor:default">'
+    +'<div class="libthumb" style="background:'+gradientFor(p.name)+';display:flex;align-items:center;justify-content:center;color:#fff">'+ic("layers",22)+'</div>'
+    +'<div style="flex:1;min-width:0">'
+      +'<div style="display:flex;align-items:center;gap:8px"><span style="font-size:var(--text-md);font-weight:700;color:var(--text-strong);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(p.name)+'</span>'
+      +'<span class="badge" data-tone="amethyst">리소스팩</span></div>'
+      +'<div style="font-size:var(--text-xs);color:var(--text-muted);margin-top:3px">'+esc(meta)+'</div>'
+    +'</div>'
+    +'<div style="display:flex;gap:8px;flex:0 0 auto" data-stop="1">'
+      +'<button class="btn btn--danger btn--sm" data-rp="del" data-rpfile="'+esc(p.filename)+'">'+ic("trash-2",16)+'제거</button>'
+    +'</div>'
+  +'</div>';
+}
+function resourcepacksScreen(){
+  const packs=state.resourcepacks;
+  let body;
+  if(!Bridge.live) body='<div class="tile" style="padding:48px;text-align:center"><div style="color:var(--text-muted);font-size:var(--text-md)">이 미리보기에서는 리소스팩 관리가 비활성화되어 있습니다.</div></div>';
+  else if(packs===null) body='<div class="tile" style="padding:48px;text-align:center;color:var(--text-muted);font-size:var(--text-md)">불러오는 중…</div>';
+  else if(packs.length===0) body='<div class="tile" style="padding:48px;text-align:center"><div style="color:var(--text-muted);font-size:var(--text-md)">아직 리소스팩이 없습니다.</div><div style="color:var(--text-faint);font-size:var(--text-sm);margin-top:6px">‘리소스팩 추가’ 로 넣거나, ‘폰트 생성’ 으로 폰트팩을 만들어 보세요.</div></div>';
+  else body='<div style="display:flex;flex-direction:column;gap:10px">'+packs.map(rpRow).join("")+'</div>';
+  return '<div style="padding:32px">'
+    +'<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:18px;flex-wrap:wrap">'
+      +'<div><h1 class="page-h1">리소스팩</h1><div class="page-sub">인게임에 적용할 리소스팩을 관리하세요</div></div>'
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+        +'<button class="btn" data-rp="folder">'+ic("folder-open",18)+'폴더</button>'
+        +'<button class="btn" data-rp="add">'+ic("plus",18)+'리소스팩 추가</button>'
+        +'<button class="btn" data-rp="font">'+ic("layers",18)+'폰트 생성</button>'
+      +'</div>'
+    +'</div>'+body
+  +'</div>';
+}
+async function loadResourcepacks(){
+  if(!Bridge.live) return;
+  try{ const r=await Bridge.api.list_resourcepacks(); state.resourcepacks=(r&&r.ok&&r.packs)?r.packs:[]; }
+  catch(_){ state.resourcepacks=[]; }
+  state.resourcepacksLoaded=true;
+  // 탭 진입 애니메이션(anim-up/down)이 끝난 뒤 그려 전환 효과가 안 지워지게 한다
+  if(state.nav==="resourcepacks") renderScreenSoon();
+}
+/* 리소스팩 추가 / 폰트 생성 모달 (mode: "zip" | "font") — 둘 다 드래그드롭 */
+function renderRpModal(){
+  const root=document.getElementById("rp-modal-root");
+  const m=state.rpModal;
+  if(!m){ root.innerHTML=""; return; }
+  const isFont=m.mode==="font", ext=isFont?".ttf":".zip", f=m.file;
+  const dropBase="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:34px 20px;border:2px dashed var(--glass-edge);border-radius:var(--r-lg);cursor:pointer;transition:border-color .15s,background .15s";
+  const drop=f
+    ? '<div id="rp-drop" data-rp="pick" style="'+dropBase+'">'+ic("box",30)
+        +'<div style="font-weight:600;color:var(--text-strong);margin-top:8px">'+esc(f.name)+'</div>'
+        +'<div style="font-size:var(--text-xs);color:var(--text-faint);margin-top:2px">'+fmtBytes(f.size)+' · 다른 파일을 놓으면 교체됩니다</div></div>'
+    : '<div id="rp-drop" data-rp="pick" style="'+dropBase+'">'+ic(isFont?"layers":"box",34)
+        +'<div style="font-weight:600;color:var(--text-strong);margin-top:8px">여기에 '+ext+' 파일을 끌어다 놓으세요</div>'
+        +'<div style="font-size:var(--text-xs);color:var(--text-faint);margin-top:4px">또는 클릭해서 파일 선택</div></div>';
+  const desc=isFont
+    ? '.ttf 폰트 파일을 넣으면 인게임 글꼴로 쓸 수 있는 리소스팩을 자동으로 만들어 리소스팩 폴더에 넣어드립니다.'
+    : '.zip 리소스팩 파일을 넣으면 리소스팩 폴더에 추가됩니다.';
+  root.innerHTML='<div class="overlay" data-rp="close"><div class="modal" data-stop="1" style="width:min(460px,100%)">'
+    +'<div style="padding:20px 22px;border-bottom:1px solid var(--glass-edge-soft);display:flex;align-items:center;justify-content:space-between">'
+      +'<div style="font-size:var(--text-lg);font-weight:700;color:var(--text-strong)">'+(isFont?"폰트 리소스팩 만들기":"리소스팩 추가")+'</div>'
+      +'<button class="closex" data-rp="close">'+ic("x",18)+'</button></div>'
+    +'<div style="padding:20px 22px;display:flex;flex-direction:column;gap:14px">'
+      +'<div style="font-size:var(--text-sm);color:var(--text-muted);line-height:1.6">'+desc+'</div>'
+      +drop
+      +'<input type="file" id="rp-file-input" accept="'+ext+'" style="display:none">'
+    +'</div>'
+    +'<div class="mfoot"><div></div><div style="display:flex;gap:8px">'
+      +'<button class="btn" data-rp="close">취소</button>'
+      +'<button class="btn btn--primary" data-rp="gen"'+((!f||m.busy)?' disabled style="opacity:.5"':'')+'>'+(m.busy?ic("refresh-cw",18)+(isFont?"생성 중…":"추가 중…"):ic("check",18)+(isFont?"생성":"추가"))+'</button>'
+    +'</div></div>'
+  +'</div></div>';
+}
+function rpReadFile(file){
+  const m=state.rpModal; if(!m||!file) return;
+  const ext=m.mode==="font"?".ttf":".zip";
+  if(!(new RegExp("\\"+ext+"$","i")).test(file.name)){ flash(ext+" 파일만 넣을 수 있습니다"); return; }
+  const reader=new FileReader();
+  reader.onload=function(){ const res=String(reader.result||""); const b64=res.slice(res.indexOf(",")+1);
+    state.rpModal=Object.assign({},state.rpModal,{file:{name:file.name,size:file.size,b64:b64},busy:false}); renderRpModal(); };
+  reader.onerror=function(){ flash("파일을 읽지 못했습니다"); };
+  reader.readAsDataURL(file);
+}
+async function rpGenerate(){
+  const m=state.rpModal;
+  if(!m||!m.file||m.busy) return;
+  if(!Bridge.live){ flash("이 미리보기에서는 비활성화되어 있습니다"); return; }
+  const isFont=m.mode==="font";
+  state.rpModal=Object.assign({},m,{busy:true}); renderRpModal();
+  try{
+    const r=isFont ? await Bridge.api.generate_font_pack(m.file.name, m.file.b64)
+                   : await Bridge.api.add_resourcepack_data(m.file.name, m.file.b64);
+    if(r&&r.ok){ state.rpModal=null; renderRpModal();
+      flash(isFont?("‘"+r.name+"’ 폰트 리소스팩을 만들었습니다"):("‘"+(r.name||m.file.name)+"’ 을(를) 추가했습니다")); loadResourcepacks(); }
+    else{ state.rpModal=Object.assign({},state.rpModal||{},{busy:false}); renderRpModal(); flash((r&&r.message)||(isFont?"폰트 생성에 실패했습니다":"리소스팩 추가에 실패했습니다")); }
+  }catch(e){ state.rpModal=Object.assign({},state.rpModal||{},{busy:false}); renderRpModal(); flash(isFont?"폰트 생성에 실패했습니다":"리소스팩 추가에 실패했습니다"); }
+}
+async function rpDelete(filename){
+  if(!Bridge.live){ flash("이 미리보기에서는 비활성화되어 있습니다"); return; }
+  try{ const r=await Bridge.api.delete_resourcepack(filename);
+    if(r&&r.ok){ flash("리소스팩을 제거했습니다"); loadResourcepacks(); }
+    else flash((r&&r.message)||"제거하지 못했습니다"); }
+  catch(e){ flash("제거하지 못했습니다"); }
 }
 
 /* ================= MODAL ================= */
@@ -1098,10 +1236,11 @@ function refreshModalAction(m){
 /* ================= RENDER ================= */
 function renderSidebar(){
   const upd=DATA.mods.concat(DATA.shaders).filter(m=>stOf(m)==="update").length;
-  const items=[["play","플레이","play",null],["mods","모드","blocks",null],["shaders","셰이더팩","sun",null],["skin","스킨","user",null],["library","라이브러리","library",upd||null],["system","설정","settings",null]];
+  const items=[["play","플레이","play",null],["skin","스킨","user",null],["resourcepacks","리소스팩","layers",null],["content","콘텐츠","blocks",null],["library","라이브러리","library",upd||null],["system","설정","settings",null]];
+  const navOn=id=>id==="content"?(state.nav==="mods"||state.nav==="shaders"):state.nav===id;
   document.getElementById("nav-list").innerHTML=items.map(it=>
-    '<button class="navitem" data-nav="'+it[0]+'" data-active="'+(state.nav===it[0])+'">'
-    +(state.nav===it[0]?'<span class="spine"></span>':'')
+    '<button class="navitem" data-nav="'+it[0]+'" data-active="'+navOn(it[0])+'">'
+    +(navOn(it[0])?'<span class="spine"></span>':'')
     +'<span class="navicon">'+ic(it[2],24)+(it[3]?'<span class="dot">'+it[3]+'</span>':'')+'</span>'
     +'<span class="label">'+it[1]+'</span></button>').join("");
   const day=resolvedTheme()==="light";
@@ -1226,7 +1365,7 @@ async function drainThumbQueue(){
 function cssEsc(s){ return String(s).replace(/["\\\]]/g,"\\$&"); }
 function renderAll(){
   document.getElementById("app").setAttribute("data-theme",resolvedTheme());
-  renderSidebar();renderCatbar();renderScreen(false);renderModal();
+  renderSidebar();renderCatbar();renderScreen(false);renderModal();renderRpModal();
 }
 
 let toastTimer=null;
@@ -1346,6 +1485,9 @@ function handleModError(res){
   flash((res && res.message) ? res.message : "작업에 실패했습니다.");
 }
 function setNav(nav){
+  // '콘텐츠' 탭은 내부적으로 모드/셰이더팩 nav 를 재사용한다 (마지막 선택 기억)
+  if(nav==="content") nav=state.contentKind||"mods";
+  if(nav==="mods"||nav==="shaders") state.contentKind=nav;
   if(nav===state.nav)return;
   state.prevNav=state.nav;state.nav=nav;state.cat="all";state.q="";
   renderSidebar();renderCatbar();renderScreen(true);
@@ -1357,6 +1499,8 @@ function setNav(nav){
   if(nav==="shaders" && Bridge.live){ loadShaderReady(); }
   if(nav==="system" && !state.mem){ loadMemory(); }
   if(nav==="play" && Bridge.live){ loadServerStatus(); }
+  // 리소스팩 탭: 매 진입 시 폴더를 다시 스캔(탐색기에서 직접 넣은 팩 반영)
+  if(nav==="resourcepacks" && Bridge.live){ loadResourcepacks(); }
 }
 function setTheme(t){
   state.theme=t;localStorage.setItem("ng-theme",t);
@@ -1390,7 +1534,7 @@ document.addEventListener("click",function(e){
   if(state.verMenu && !e.target.closest('[data-ver="menu"]') && !e.target.closest(".ver-menu")){
     const id=state.verMenu; state.verMenu=null; refreshModalActionById(id);
   }
-  const t=e.target.closest("[data-nav],[data-cat],[data-install],[data-open],[data-close-modal],[data-close-update],[data-update-install],[data-theme-set],[data-update],[data-flash],[data-libfilter],[data-launch],[data-verchip],[data-act],[data-project],[data-gate],[data-acct],[data-client],[data-skin],[data-skinm],[data-ver],[data-mem],[data-modrm],#theme-steve,.wc");
+  const t=e.target.closest("[data-nav],[data-cat],[data-install],[data-open],[data-close-modal],[data-close-update],[data-update-install],[data-theme-set],[data-update],[data-flash],[data-libfilter],[data-launch],[data-verchip],[data-act],[data-rp],[data-content],[data-project],[data-gate],[data-acct],[data-client],[data-skin],[data-skinm],[data-ver],[data-mem],[data-modrm],#theme-steve,.wc");
   if(!t)return;
   /* 오버레이 배경 클릭만 '닫기'로 취급 — 모달 내부(data-stop) 클릭이
      closest 로 오버레이까지 번져 닫히는 것 방지 (v2.1 잠복 버그 수정) */
@@ -1480,6 +1624,17 @@ document.addEventListener("click",function(e){
   if(t.hasAttribute("data-flash")){flash(t.getAttribute("data-flash"));return;}
   if(t.hasAttribute("data-verchip")){flash("동글랜드는 현재 "+DATA.account.version+"만을 지원합니다");return;}
   if(t.hasAttribute("data-launch")){doLaunch();return;}
+  if(t.hasAttribute("data-rp")){
+    const k=t.getAttribute("data-rp");
+    if(k==="close"){ if(!__ovBlock){ state.rpModal=null; renderRpModal(); } return; }
+    if(k==="pick"){ const inp=document.getElementById("rp-file-input"); if(inp) inp.click(); return; }
+    if(k==="gen"){ rpGenerate(); return; }
+    if(k==="font"){ if(!Bridge.live){ flash("이 미리보기에서는 비활성화되어 있습니다"); return; } state.rpModal={mode:"font",file:null,busy:false}; renderRpModal(); return; }
+    if(k==="add"){ if(!Bridge.live){ flash("이 미리보기에서는 비활성화되어 있습니다"); return; } state.rpModal={mode:"zip",file:null,busy:false}; renderRpModal(); return; }
+    if(k==="del"){ rpDelete(t.getAttribute("data-rpfile")); return; }
+    if(k==="folder"){ handleSettingAct("rp-folder"); return; }
+    return;
+  }
   if(t.hasAttribute("data-act")){handleSettingAct(t.getAttribute("data-act"));return;}
   if(t.hasAttribute("data-project")){
     if(Bridge.live){ Bridge.api.open_project_page(t.getAttribute("data-pkind"), t.getAttribute("data-project")); flash("브라우저에서 프로젝트 페이지를 엽니다"); }
@@ -1493,6 +1648,7 @@ document.addEventListener("click",function(e){
     closeUpdateModal();
     return;
   }
+  if(t.hasAttribute("data-content")){contentSwitch(t.getAttribute("data-content"));return;}
   if(t.hasAttribute("data-nav")){setNav(t.getAttribute("data-nav"));return;}
   if(t.hasAttribute("data-cat")){setCat(t.getAttribute("data-cat"));return;}
   if(t.hasAttribute("data-libfilter")){state.libFilter=t.getAttribute("data-libfilter");renderScreen(false);return;}
@@ -1511,6 +1667,24 @@ document.addEventListener("input",function(e){
 /* 슬라이더에서 손을 뗄 때만 저장 */
 document.addEventListener("change",function(e){
   if(e.target && e.target.id==="mem-range"){ memCommit(+e.target.value); }
+  if(e.target && e.target.id==="rp-file-input"){ rpReadFile(e.target.files&&e.target.files[0]); }
+});
+/* 폰트 모달 드래그드롭: 모달이 열려 있을 때만. 드롭존 밖에 떨어져도 웹뷰가
+   파일을 열어 페이지가 바뀌지 않도록 항상 preventDefault 한다. */
+document.addEventListener("dragover",function(e){
+  if(!state.rpModal)return; e.preventDefault();
+  const z=e.target.closest&&e.target.closest("#rp-drop");
+  if(z){ z.style.borderColor="var(--grass-500)"; z.style.background="var(--tint-grass)"; }
+});
+document.addEventListener("dragleave",function(e){
+  if(!state.rpModal)return;
+  const z=e.target.closest&&e.target.closest("#rp-drop");
+  if(z){ z.style.borderColor=""; z.style.background=""; }
+});
+document.addEventListener("drop",function(e){
+  if(!state.rpModal)return; e.preventDefault();
+  const z=e.target.closest&&e.target.closest("#rp-drop"); if(!z)return;
+  rpReadFile(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]);
 });
 document.addEventListener("mousedown",function(e){
   // 모달 내부(data-stop)에서 시작한 마우스다운 표시 → 드래그로 밖에 나가도 안 닫힘
@@ -1520,6 +1694,7 @@ document.addEventListener("keydown",function(e){
   if(e.key!=="Escape")return;
   if(state.detail){state.detail=null;renderModal();}
   if(state.skinModal){state.skinModal=null;renderSkinModal();}
+  if(state.rpModal){state.rpModal=null;renderRpModal();}
   if(state.acctOpen){state.acctOpen=false;state.logoutArmed=false;renderAcct();}
 });
 if(window.matchMedia){window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change",function(e){state.sysDark=e.matches;if(state.theme==="system"){document.getElementById("app").setAttribute("data-theme",resolvedTheme());renderSidebar();}});}
@@ -2178,7 +2353,7 @@ async function loadServerStatus(){
   if(!Bridge.live) return;
   try{
     const r = await Bridge.api.get_server_status();
-    if(r){ state.server = r; if(state.nav==="play") renderScreen(false); }
+    if(r){ state.server = r; if(state.nav==="play") renderScreenSoon(); }
   }catch(_){}
 }
 
@@ -2278,6 +2453,9 @@ async function handleSettingAct(act){
   }else if(act==="shader-folder"){
     const r=await Bridge.api.open_shaderpacks_folder();
     flash(r&&r.ok?"셰이더팩 폴더를 열었습니다":((r&&r.message)||"폴더를 열 수 없습니다"));
+  }else if(act==="rp-folder"){
+    const r=await Bridge.api.open_resourcepacks_folder();
+    flash(r&&r.ok?"리소스팩 폴더를 열었습니다":((r&&r.message)||"폴더를 열 수 없습니다"));
   }else if(act==="logs"){
     const r=await Bridge.api.open_log_folder();
     flash(r&&r.ok?"로그 폴더를 열었습니다":((r&&r.message)||"로그 폴더를 열 수 없습니다"));

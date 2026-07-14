@@ -4,11 +4,7 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = [('assets', 'assets'), ('frontend', 'frontend'), ('dongleland-core.jar', '.')]
 binaries = []
-hiddenimports = [
-    # v3: api.py 가 지연 임포트하는 신규 모듈 (PyInstaller 정적 분석 누락 방지)
-    'auth', 'instance', 'game_installer', 'launcher',
-    'minecraft_launcher_lib',
-]
+hiddenimports = []
 datas += collect_data_files('certifi')
 tmp_ret = collect_all('webview')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
