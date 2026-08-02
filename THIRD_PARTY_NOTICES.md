@@ -36,6 +36,14 @@
 - 출처: https://github.com/certifi/python-certifi
 - 용도: TLS 인증서 번들 (exe 배포 시 SSL 검증)
 
+### ASM (OW2)
+- 저작자: OW2 Consortium (Copyright (c) 2000-2011 INRIA, France Telecom)
+- 라이선스: **BSD 3-Clause License**
+- 버전: 9.10.1 (`asm`, `asm-tree`)
+- 출처: https://asm.ow2.io/
+- 용도: 코어 모드의 바이트코드 변환(Java Agent)
+- 위치: `dongleland-core.jar` 안에 shade + relocate(`kr.dongleland.core.shadow.asm`) 되어 포함
+
 ### skinview3d
 - Copyright (c) 2014-2018 Kent Rasmussen
 - Copyright (c) 2017-2022 Haowei Wen, Sean Boult and contributors
