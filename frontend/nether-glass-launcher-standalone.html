@@ -1590,7 +1590,7 @@ document.addEventListener("click",function(e){
   if(state.verMenu && !e.target.closest('[data-ver="menu"]') && !e.target.closest(".ver-menu")){
     const id=state.verMenu; state.verMenu=null; refreshModalActionById(id);
   }
-  const t=e.target.closest("[data-nav],[data-cat],[data-install],[data-open],[data-close-modal],[data-close-update],[data-update-install],[data-theme-set],[data-update],[data-flash],[data-libfilter],[data-launch],[data-verchip],[data-act],[data-rp],[data-content],[data-project],[data-gate],[data-acct],[data-client],[data-skin],[data-skinm],[data-ver],[data-mem],[data-modrm],#theme-steve,.wc");
+  const t=e.target.closest("[data-nav],[data-cat],[data-install],[data-open],[data-close-modal],[data-close-update],[data-update-install],[data-theme-set],[data-update],[data-flash],[data-libfilter],[data-launch],[data-verchip],[data-act],[data-rp],[data-content],[data-project],[data-gate],[data-acct],[data-client],[data-skin],[data-skinm],[data-ver],[data-mem],[data-modrm],[data-appset],#theme-steve,.wc");
   if(!t)return;
   /* 오버레이 배경 클릭만 '닫기'로 취급 — 모달 내부(data-stop) 클릭이
      closest 로 오버레이까지 번져 닫히는 것 방지 (v2.1 잠복 버그 수정) */
