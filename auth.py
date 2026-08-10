@@ -38,6 +38,7 @@ import base64
 import json
 import os
 import sys
+import threading
 import time
 
 import requests
@@ -64,6 +65,9 @@ _REDIRECT_PATH = "/"
 
 # MC 토큰 만료 여유 (초). 남은 시간이 이보다 짧으면 선제 갱신.
 _EXPIRY_MARGIN = 300
+
+# refresh_token 회전 때문에 갱신은 한 번에 하나만 (실행·스킨이 동시에 부른다).
+_REFRESH_LOCK = threading.Lock()
 
 # XSTS 오류 코드 → 사용자 안내 (wiki.vg 문서 기준)
 _XERR_MESSAGES = {
@@ -441,28 +445,76 @@ def _xsts_error_message(e) -> str:
 # ── 3) 리프레시 (MS refresh_token → 체인 재수행) ─────────────────────────
 
 def _refresh(account: dict) -> dict:
-    refresh_token = account.get("ms_refresh_token")
-    if not refresh_token:
+    """MS refresh_token 으로 갱신. 동시 호출은 직렬화한다.
+
+    ⚠️ MS 는 갱신 때마다 refresh_token 을 **회전**시키고 쓴 토큰을 곧 무효화한다.
+    두 곳(실행·스킨)이 동시에 같은 토큰으로 갱신하면 한쪽은 invalid_grant 를 받는다 →
+    락으로 직렬화하고, 기다리는 동안 다른 호출이 이미 갱신했으면 그 결과를 그대로 쓴다.
+    """
+    if not account.get("ms_refresh_token"):
         raise AuthError("저장된 로그인 정보가 만료됐습니다. 다시 로그인해주세요.", code="relogin")
-    r = requests.post(
-        _TOKEN_URL,
-        data={
-            "grant_type": "refresh_token",
-            "client_id": _client_id(),
-            "refresh_token": refresh_token,
-            "scope": _SCOPE,
-        },
-        timeout=15,
-    )
-    data = r.json()
+    with _REFRESH_LOCK:
+        current = _load_account()
+        if current and current.get("mc_uuid") == account.get("mc_uuid"):
+            if time.time() < current.get("mc_expires_at", 0) - _EXPIRY_MARGIN:
+                return current              # 락 대기 중에 다른 호출이 이미 갱신함
+            account = current               # 회전된 최신 토큰으로 진행
+        return _refresh_locked(account)
+
+
+def _refresh_locked(account: dict) -> dict:
+    refresh_token = account["ms_refresh_token"]
+    try:
+        r = requests.post(
+            _TOKEN_URL,
+            data={
+                "grant_type": "refresh_token",
+                "client_id": _client_id(),
+                "refresh_token": refresh_token,
+                "scope": _SCOPE,
+            },
+            timeout=15,
+        )
+    except Exception as e:
+        # 네트워크 문제는 로그인 만료가 아니다 — 재로그인을 요구하면 안 된다.
+        raise AuthError(f"로그인 갱신 중 네트워크 오류가 발생했습니다:\n{e}", code="network")
+    try:
+        data = r.json()
+    except Exception:
+        data = {}
     if "access_token" not in data:
-        raise AuthError("로그인이 만료됐습니다. 다시 로그인해주세요.", code="relogin")
-    # MS 는 refresh 시 새 refresh_token 을 줄 수 있음 → 교체 저장
-    if not data.get("refresh_token"):
-        data["refresh_token"] = refresh_token
-    new_account = _complete_xbox_chain(data)
+        _log_auth(f"[인증] refresh 실패 http={r.status_code} error={data.get('error')}")
+        # 진짜로 죽은 토큰일 때만 재로그인. 5xx·본문 없음은 일시적 장애다.
+        if data.get("error") in ("invalid_grant", "invalid_client", "unauthorized_client"):
+            raise AuthError("로그인이 만료됐습니다. 다시 로그인해주세요.", code="relogin")
+        raise AuthError(
+            f"로그인 갱신에 실패했습니다 (HTTP {r.status_code}). 잠시 후 다시 시도해주세요.",
+            code="network")
+
+    # ★ 회전된 refresh_token 을 Xbox 체인보다 **먼저** 저장한다.
+    # 체인(XBL·XSTS·MC·프로필)은 실패가 잦은데, 여기서 저장하지 않으면 방금 무효화된 옛
+    # 토큰만 파일에 남아 다음 실행에서 반드시 로그인이 풀린다.
+    new_rt = data.get("refresh_token") or refresh_token
+    if new_rt != refresh_token:
+        _merge_account(account["mc_uuid"], {"ms_refresh_token": new_rt})
+    data["refresh_token"] = new_rt
+
+    try:
+        new_account = _complete_xbox_chain(data)
+    except AuthError as e:
+        _log_auth(f"[인증] xbox 체인 실패 code={e.code}: {e.message.splitlines()[0]}")
+        raise
     _save_account(new_account)
     return new_account
+
+
+def _log_auth(line: str):
+    """진단용 한 줄 (log.txt). 실패해도 인증 흐름에는 영향 없음."""
+    try:
+        import preflight
+        preflight.write_log(line)
+    except Exception:
+        pass
 
 
 # ── 4) 저장/로드 (DPAPI 암호화) ───────────────────────────────────────────
@@ -550,7 +602,9 @@ def _load_store() -> dict:
                 return store
         except Exception:
             pass
-        return {"active": None, "accounts": {}}
+        # 읽기·복호에 실패한 경우. 빈 저장소로 굴리되 **원본을 덮어쓰지 않게** 표시한다
+        # (그대로 저장하면 계정이 영구 소실된다 — DPAPI 일시 실패·파일 잠김에도 마찬가지).
+        return {"active": None, "accounts": {}, "_unreadable": True}
     legacy = _migrate_legacy()  # 레거시 단일 계정 → 마이그레이션
     return legacy or {"active": None, "accounts": {}}
 
@@ -574,10 +628,28 @@ def _migrate_legacy():
 
 def _save_store(store: dict):
     os.makedirs(instance.root_dir(), exist_ok=True)
-    tmp = instance.accounts_path() + ".tmp"
+    path = instance.accounts_path()
+    if store.pop("_unreadable", False) and os.path.isfile(path):
+        # 못 읽은 파일을 그냥 덮어쓰면 복구할 길이 없어진다 → .bak 으로 남기고 새로 쓴다.
+        try:
+            os.replace(path, path + ".bak")
+            _log_auth("[인증] accounts.dat 를 읽지 못해 accounts.dat.bak 으로 보존")
+        except OSError:
+            pass
+    tmp = path + ".tmp"
     with open(tmp, "wb") as f:
         f.write(_encrypt_blob(store))
-    os.replace(tmp, instance.accounts_path())
+    os.replace(tmp, path)
+
+
+def _merge_account(uuid: str, patch: dict):
+    """활성 계정을 바꾸지 않고 해당 계정의 필드만 갱신한다(회전된 토큰 즉시 보존용)."""
+    store = _load_store()
+    acc = store["accounts"].get(uuid)
+    if not acc:
+        return
+    acc.update(patch)
+    _save_store(store)
 
 
 def _save_account(account: dict):

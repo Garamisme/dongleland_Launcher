@@ -4,7 +4,7 @@
 tkinter 파일을 쓰지 않으므로 여기로 분리해 백엔드/브릿지가 공유한다.
 """
 
-APP_VERSION = "3.1.3"
+APP_VERSION = "3.1.4"
 # 릴리스 채널: "beta" 면 UI 에 베타 표식을 붙인다. 정식 배포 시 "release" 로.
 APP_CHANNEL = "release"
 
@@ -15,6 +15,9 @@ _REPO = "https://github.com/Garamisme/dongleland_Launcher"
 TERMS_URL = f"{_REPO}/blob/HEAD/TERMS.md"
 NOTICES_URL = f"{_REPO}/blob/HEAD/THIRD_PARTY_NOTICES.md"
 APP_AUTHOR = "Garamisme"
+# HKCU\...\Run 값 이름 (Windows 시작 프로그램 등록 — autostart.py).
+# 제품마다 달라야 서로의 등록을 덮어쓰지 않는다.
+STARTUP_REG_NAME = "DonglelandLauncher"
 GAME_VERSION = "26.1.2"
 LOADER = "fabric"
 

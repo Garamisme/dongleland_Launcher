@@ -1949,6 +1949,27 @@ class Api:
         except Exception:
             return {"running": False}
 
+    # ── 런처 동작 설정 (Windows 시작 프로그램) ────────────────────────────
+    def get_app_settings(self):
+        """{"ok":True, run_at_startup, startup_supported, startup_blocked}"""
+        try:
+            import autostart
+            st = autostart.status()
+            return {"ok": True,
+                    "run_at_startup": st["enabled"],
+                    "startup_supported": st["supported"],
+                    "startup_blocked": st["blocked"]}
+        except Exception as e:
+            return {"ok": False, "message": str(e)}
+
+    def set_run_at_startup(self, on):
+        """레지스트리(HKCU Run)가 진실이라 config 에 따로 저장하지 않는다."""
+        try:
+            import autostart
+            return autostart.set_enabled(bool(on))
+        except Exception as e:
+            return {"ok": False, "enabled": False, "message": str(e)}
+
     def memory_info(self):
         """Java 할당 메모리 설정 + 시스템 총 RAM.
 

@@ -39,7 +39,7 @@ def main():
         "frontend", "nether-glass-launcher-standalone.html"
     ))
 
-    window = webview.create_window(
+    kwargs = dict(
         title=f"동글랜드 런처 v{app_meta.APP_VERSION}",
         url=html_path,
         js_api=api,
@@ -49,6 +49,16 @@ def main():
         frameless=True,       # OS 타이틀바 제거 → HTML 커스텀 타이틀바 사용
         easy_drag=False,      # 전체 드래그 비활성 (제목표시줄 drag-region 만 이동)
     )
+    # 시작 프로그램으로 부팅 때 뜬 경우(autostart.py 가 --autostart 를 붙인다)
+    # 창을 최소화해 띄운다 — 매 부팅마다 창이 튀어나오지 않게.
+    if "--autostart" in sys.argv:
+        kwargs["minimized"] = True
+    try:
+        window = webview.create_window(**kwargs)
+    except TypeError:
+        # 이 pywebview 버전이 minimized 를 모르면 그냥 일반 창으로.
+        kwargs.pop("minimized", None)
+        window = webview.create_window(**kwargs)
     api._window = window  # Python→JS push(evaluate_js)용 참조
 
     # 앱 종료 시 플레이 시간 세션을 최종 정리(누적). 종료 경로가 여러 개라
