@@ -867,19 +867,41 @@ function libRowHTML(m,kind){const s=stOf(m);
       +'<button class="btn btn--danger btn--sm" data-modrm="'+esc(m.title)+'" data-id="'+esc(m.id||"")+'">'+ic("trash-2",16)+'제거</button>'
     +'</div>'
   +'</div>';}
+/* 카탈로그 밖에서 mods 폴더에 직접 넣은 jar — 이름·버전 정보가 없어 파일명으로 보여준다 */
+function extraModRowHTML(x){
+  return '<div class="librow" style="cursor:default">'
+    +'<div class="libthumb" style="background:'+gradientFor(x.filename)+';display:flex;align-items:center;justify-content:center;color:#fff">'+ic("blocks",22)+'</div>'
+    +'<div style="flex:1;min-width:0">'
+      +'<div style="display:flex;align-items:center;gap:8px"><span style="font-size:var(--text-md);font-weight:700;color:var(--text-strong);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(x.filename)+'</span>'
+      +'<span class="badge" data-tone="gold">직접 추가</span></div>'
+      +'<div style="font-size:var(--text-xs);color:var(--text-muted);margin-top:3px">'+esc(fmtBytes(x.size)||"")+'</div>'
+    +'</div>'
+    +'<div style="display:flex;gap:8px;flex:0 0 auto" data-stop="1">'
+      +'<button class="btn btn--danger btn--sm" data-extrarm="'+esc(x.filename)+'">'+ic("trash-2",16)+'제거</button>'
+    +'</div>'
+  +'</div>';
+}
+async function extraModDelete(filename){
+  if(!Bridge.live){ flash("이 미리보기에서는 비활성화되어 있습니다"); return; }
+  try{ const r=await Bridge.api.remove_extra_mod(filename);
+    if(r&&r.ok){ state.extraMods=(state.extraMods||[]).filter(x=>x.filename!==filename); flash("모드를 제거했습니다"); if(state.nav==="library") renderScreen(false); }
+    else flash((r&&r.message)||"제거하지 못했습니다"); }
+  catch(e){ flash("제거하지 못했습니다"); }
+}
 function libraryScreen(){
   const inst=m=>{const s=stOf(m);return s==="installed"||s==="update";};
-  const iMods=DATA.mods.filter(inst), iSh=DATA.shaders.filter(inst);
+  const iMods=DATA.mods.filter(inst), iSh=DATA.shaders.filter(inst), iExt=state.extraMods||[];
   const f=state.libFilter||"all";
-  const chips=[["all","전체",iMods.length+iSh.length],["mods","모드",iMods.length],["shaders","셰이더팩",iSh.length]];
+  const chips=[["all","전체",iMods.length+iExt.length+iSh.length],["mods","모드",iMods.length+iExt.length],["shaders","셰이더팩",iSh.length]];
   const rowHTML=libRowHTML;
   const showMods=f!=="shaders", showSh=f!=="mods";
-  const empty=(showMods?iMods.length:0)+(showSh?iSh.length:0)===0;
+  const empty=(showMods?iMods.length+iExt.length:0)+(showSh?iSh.length:0)===0;
   let body;
   if(empty){body='<div class="tile" style="padding:48px;text-align:center"><div style="color:var(--text-muted);font-size:var(--text-md)">아직 설치된 항목이 없습니다.</div><div style="color:var(--text-faint);font-size:var(--text-sm);margin-top:6px">모드 또는 셰이더팩 탭에서 콘텐츠를 추가하세요.</div></div>';}
   else{
     body='<div style="display:flex;flex-direction:column;gap:22px">';
     if(showMods&&iMods.length)body+='<div><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;color:var(--text-body)">'+ic("blocks",18)+'<span style="font-size:var(--text-md);font-weight:700;color:var(--text-strong)">모드</span><span class="mono" style="font-size:var(--text-xs);color:var(--text-faint)">'+iMods.length+'</span></div><div style="display:flex;flex-direction:column;gap:10px">'+iMods.map(m=>rowHTML(m,"mods")).join("")+'</div></div>';
+    if(showMods&&iExt.length)body+='<div><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;color:var(--text-body)">'+ic("folder-open",18)+'<span style="font-size:var(--text-md);font-weight:700;color:var(--text-strong)">직접 추가한 모드</span><span class="mono" style="font-size:var(--text-xs);color:var(--text-faint)">'+iExt.length+'</span></div><div style="display:flex;flex-direction:column;gap:10px">'+iExt.map(extraModRowHTML).join("")+'</div></div>';
     if(showSh&&iSh.length)body+='<div><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;color:var(--text-body)">'+ic("sun",18)+'<span style="font-size:var(--text-md);font-weight:700;color:var(--text-strong)">셰이더팩</span><span class="mono" style="font-size:var(--text-xs);color:var(--text-faint)">'+iSh.length+'</span></div><div style="display:flex;flex-direction:column;gap:10px">'+iSh.map(m=>rowHTML(m,"shaders")).join("")+'</div></div>';
     body+='</div>';
   }
@@ -1590,7 +1612,7 @@ document.addEventListener("click",function(e){
   if(state.verMenu && !e.target.closest('[data-ver="menu"]') && !e.target.closest(".ver-menu")){
     const id=state.verMenu; state.verMenu=null; refreshModalActionById(id);
   }
-  const t=e.target.closest("[data-nav],[data-cat],[data-install],[data-open],[data-close-modal],[data-close-update],[data-update-install],[data-theme-set],[data-update],[data-flash],[data-libfilter],[data-launch],[data-verchip],[data-act],[data-rp],[data-content],[data-project],[data-gate],[data-acct],[data-client],[data-skin],[data-skinm],[data-ver],[data-mem],[data-modrm],[data-appset],#theme-steve,.wc");
+  const t=e.target.closest("[data-nav],[data-cat],[data-install],[data-open],[data-close-modal],[data-close-update],[data-update-install],[data-theme-set],[data-update],[data-flash],[data-libfilter],[data-launch],[data-verchip],[data-act],[data-rp],[data-content],[data-project],[data-gate],[data-acct],[data-client],[data-skin],[data-skinm],[data-ver],[data-mem],[data-modrm],[data-extrarm],[data-appset],#theme-steve,.wc");
   if(!t)return;
   /* 오버레이 배경 클릭만 '닫기'로 취급 — 모달 내부(data-stop) 클릭이
      closest 로 오버레이까지 번져 닫히는 것 방지 (v2.1 잠복 버그 수정) */
@@ -1653,6 +1675,7 @@ document.addEventListener("click",function(e){
     return;
   }
   if(t.hasAttribute("data-modrm")){e.stopPropagation();doRemove(t.getAttribute("data-modrm"));return;}
+  if(t.hasAttribute("data-extrarm")){e.stopPropagation();extraModDelete(t.getAttribute("data-extrarm"));return;}
   if(t.hasAttribute("data-install")){e.stopPropagation();doInstall(t.getAttribute("data-install"));return;}
   if(t.hasAttribute("data-update")){
     const upid=t.getAttribute("data-upid");
@@ -2205,7 +2228,7 @@ async function continueBoot(){
     applyVersions(ver);
     // 설치된 모드 개수가 정확해질 때까지(스캔 완료) 로딩 화면을 유지한다.
     const scan = await Bridge.api.scan_mods();
-    if(scan && scan.ok){ applyStatuses(scan.statuses, scan.versions); }
+    if(scan && scan.ok){ applyStatuses(scan.statuses, scan.versions); state.extraMods=scan.extra||[];  if(scan.lookup_ok===false) flash("모드 정보를 확인하지 못했어요 — 마지막으로 확인된 설치 상태로 표시합니다"); }
     else if(scan && scan.reason){ flash(scan.reason); }
     state.booting=false;          // 스캔까지 끝난 뒤 실제 런처 렌더
     renderAll();
@@ -2552,7 +2575,7 @@ async function handleSettingAct(act){
         if(r&&r.ok){
           flash("초기화 완료 — 모드 "+r.removed_mods+"개, 셰이더 "+r.removed_shaders+"개 제거");
           const scan=await Bridge.api.scan_mods();
-          if(scan&&scan.ok){ applyStatuses(scan.statuses, scan.versions); }
+          if(scan&&scan.ok){ applyStatuses(scan.statuses, scan.versions); state.extraMods=scan.extra||[]; }
           loadShaders(); renderSidebar();
         }else{ flash((r&&r.message)||"초기화 실패"); }
       }catch(e){ flash("초기화 중 오류: "+e); }

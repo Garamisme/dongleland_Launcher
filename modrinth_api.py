@@ -93,6 +93,8 @@ def get_versions_from_hashes(hashes: list, algorithm: str = "sha1") -> dict:
     한 번에 처리한다 (부팅 시 모드 스캔이 N 회 → 1 회).
 
     반환: { hash: version_dict, ... }  (매칭 안 된 해시는 키가 없음)
+          조회 자체가 실패하면 None — '매칭 없음({})'과 구분해야 호출부가
+          설치된 모드를 '없음'으로 오판하지 않는다.
     """
     if not hashes:
         return {}
@@ -102,7 +104,7 @@ def get_versions_from_hashes(hashes: list, algorithm: str = "sha1") -> dict:
         return _post_json(f"{API_BASE}/version_files",
                           {"hashes": lowered, "algorithm": algorithm}) or {}
     except Exception:
-        return {}
+        return None
 
 
 def get_latest_versions_from_hashes(hashes: list, game_version: str,
@@ -977,6 +979,11 @@ class ModRegistry:
     def record_remove(self, mod_id: str):
         self._data["mods"].pop(mod_id, None)
         self._save()
+
+    def filenames(self) -> set[str]:
+        """기록된 모든 항목(카탈로그 모드·의존 모드·번들)의 파일명."""
+        return {info["filename"] for info in self._data["mods"].values()
+                if info.get("filename")}
 
     def get_installed_version(self, mod_id: str) -> str | None:
         info = self.get(mod_id)

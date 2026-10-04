@@ -17,5 +17,11 @@ setTimeout(async()=>{
     rm.dispatchEvent(new w.MouseEvent("click",{bubbles:true})); await sleep(400);
     console.log("클릭 후 상태:", m.state, m.state==="install"? "✅ 제거됨":"❌ 업데이트됨");
   }
+  // 카탈로그 밖에서 직접 넣은 jar 도 라이브러리에 보여야 한다
+  w.eval('state').extraMods=[{filename:"my-mod.jar",size:2048}];
+  w.eval('renderScreen')(false); await sleep(200);
+  const ext=$$('[data-extrarm]');
+  console.log("직접 추가한 모드 행:", ext.length===1 && ext[0].getAttribute("data-extrarm")==="my-mod.jar" ? "✅" : "❌ "+ext.length);
+  console.log("섹션 제목:", d.body.textContent.includes("직접 추가한 모드") ? "✅" : "❌ 없음");
   process.exit(0);
 },600);

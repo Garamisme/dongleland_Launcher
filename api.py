@@ -684,10 +684,15 @@ class Api:
         installed_by_pid = {}
         sha1_to_jar = {}
         required_pids = set()
+        jars = []
+        # 조회 실패(네트워크·429)를 '모드 없음'으로 읽으면 설치된 모드가 0개로 보이고
+        # 설치 기록까지 지워진다. 실패면 레지스트리(마지막으로 확인된 상태)를 믿는다.
+        lookup_ok = True
         if os.path.isdir(mods_dir):
             for jar in os.listdir(mods_dir):
                 if not jar.lower().endswith(".jar") or jar.startswith("."):
                     continue
+                jars.append(jar)
                 path = os.path.join(mods_dir, jar)
                 try:
                     local_sha1 = modrinth_api.sha1_of_file_cached(path)
@@ -697,6 +702,8 @@ class Api:
 
         if sha1_to_jar:
             found = modrinth_api.get_versions_from_hashes(list(sha1_to_jar.keys()))
+            if found is None:
+                lookup_ok = False
             for h, info in (found or {}).items():
                 if not info or not info.get("project_id"):
                     continue
@@ -755,13 +762,34 @@ class Api:
                     self._mod_statuses[mid] = "update"
                 else:
                     self._mod_statuses[mid] = "installed"
+            elif not lookup_ok or not pid:
+                # 확인을 못 한 것이지 지워진 게 아니다 → 기록 + 파일 존재가 진실
+                if self._registry.is_installed(mid):
+                    ver = self._registry.get_installed_version(mid)
+                    self._mod_statuses[mid] = "installed"
+                    self._mod_versions[mid] = {"installed": ver, "latest": ver}
+                else:
+                    self._mod_statuses[mid] = "not_installed"
             else:
                 if self._registry.is_installed(mid):
                     self._registry.record_remove(mid)
                 self._mod_statuses[mid] = "not_installed"
 
+        # 카탈로그·의존 모드·번들 어디에도 기록되지 않은 jar = 사용자가 직접 넣은 모드
+        claimed = self._registry.filenames()
+        extra = []
+        for jar in sorted(jars, key=str.lower):
+            if jar in claimed:
+                continue
+            try:
+                size = os.path.getsize(os.path.join(mods_dir, jar))
+            except OSError:
+                size = 0
+            extra.append({"filename": jar, "size": size})
+
         return {"ok": True, "statuses": dict(self._mod_statuses),
-                "versions": dict(getattr(self, "_mod_versions", {}))}
+                "versions": dict(getattr(self, "_mod_versions", {})),
+                "extra": extra, "lookup_ok": lookup_ok}
 
     # ══════════════════════════════════════════════════════════════════════
     #  설치 / 제거 / 업데이트 — tkinter _install_single/_do_* 이식
@@ -1170,6 +1198,30 @@ class Api:
         self._mod_statuses[mod_id] = "not_installed"
         preflight.write_log(f"[제거] {mod.get('name', mod_id)}")
         return {"ok": True, "status": "not_installed"}
+
+    def remove_extra_mod(self, filename):
+        """사용자가 직접 넣은 jar(카탈로그 밖) 제거.
+
+        카탈로그가 관리하는 파일은 거부한다 — 그건 remove_mod 의 필수 모드 검사를 거쳐야 한다.
+        """
+        if not self._registry:
+            r = self.ensure_ready()
+            if not r.get("ready"):
+                return {"ok": False, "message": r.get("reason", "준비 실패")}
+        base = os.path.basename(filename or "")
+        if not base or base != filename or not base.lower().endswith(".jar"):
+            return {"ok": False, "message": "잘못된 파일명입니다."}
+        if base in self._registry.filenames():
+            return {"ok": False, "message": "런처가 관리하는 모드입니다. 모드 목록에서 제거해주세요."}
+        path = os.path.join(self._mods_dir, base)
+        if not os.path.isfile(path):
+            return {"ok": True, "status": "not_found"}
+        try:
+            os.remove(path)
+        except OSError as e:
+            return {"ok": False, "message": str(e)}
+        preflight.write_log(f"[제거] 직접 추가한 모드 {base}")
+        return {"ok": True}
 
     def update_mod(self, mod_id):
         """모드 업데이트 (재설치 후 이전 파일 정리).

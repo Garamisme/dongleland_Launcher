@@ -57,6 +57,16 @@ def auth_rules():
         fails.append("토큰 갱신")
 
 
+def scan_rules():
+    step("모드 스캔 규칙")
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    r = subprocess.run([sys.executable, os.path.join(TESTS, "scantest.py")],
+                       capture_output=True, text=True, env=env, timeout=120)
+    print(r.stdout.strip() or r.stderr.strip()[:400])
+    if r.returncode:
+        fails.append("모드 스캔")
+
+
 def contract():
     step("프론트 ↔ api.py 계약")
     html = open(HTML, encoding="utf-8").read()
@@ -130,6 +140,7 @@ def suites():
 if __name__ == "__main__":
     compile_backend()
     auth_rules()
+    scan_rules()
     contract()
     js_and_dupes()
     suites()
