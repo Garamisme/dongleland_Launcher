@@ -67,6 +67,16 @@ def scan_rules():
         fails.append("모드 스캔")
 
 
+def policy_rules():
+    step("원격 허용 모드 정책")
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    r = subprocess.run([sys.executable, os.path.join(TESTS, "policytest.py")],
+                       capture_output=True, text=True, env=env, timeout=120)
+    print(r.stdout.strip() or r.stderr.strip()[:400])
+    if r.returncode:
+        fails.append("허용 모드 정책")
+
+
 def contract():
     step("프론트 ↔ api.py 계약")
     html = open(HTML, encoding="utf-8").read()
@@ -141,6 +151,7 @@ if __name__ == "__main__":
     compile_backend()
     auth_rules()
     scan_rules()
+    policy_rules()
     contract()
     js_and_dupes()
     suites()

@@ -25,6 +25,11 @@ LOADER = "fabric"
 SERVER_HOST = "dongleland.com"
 SERVER_PORT = 25565
 
+# 허용 모드 원격 목록. 운영자가 관리 도구로 고치면
+# 런처 재시작만으로 반영된다(공개 읽기, 개인정보 전송 없음).
+MOD_POLICY_URL = "https://api.tycoonclient.com/server-mods"
+MOD_POLICY_SERVER_ID = "dongleland"
+
 # v3: Microsoft 로그인용 Azure 앱 Application(client) ID.
 # 비밀값 아님(공개 가능). Azure Portal 등록 + Mojang 승인 폼
 # (aka.ms/mce-reviewappid) 완료 후 실제 값으로 교체할 것. — auth.py 참고

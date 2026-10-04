@@ -171,6 +171,30 @@ def save_config(config: dict):
         pass
 
 
+def fetch_mod_policy(config: dict):
+    """원격 허용 모드 정책(dongleland 항목). 실패하면 마지막 성공값, 그것도 없으면 None.
+
+    None 이면 호출부는 카탈로그를 그대로 쓴다 — 원격이 죽어도 목록이 비지 않는다.
+    성공값은 config["_mod_policy"] 에 저장한다(오프라인 부팅 대비).
+    """
+    import app_meta
+    cached = config.get("_mod_policy")
+    try:
+        req = urllib.request.Request(app_meta.MOD_POLICY_URL,
+                                     headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=5, context=_SSL_CONTEXT) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        pol = data["servers"][app_meta.MOD_POLICY_SERVER_ID]
+        if not isinstance(pol, dict) or not isinstance(pol.get("allowed_mods"), list):
+            raise ValueError("형식 오류")
+    except Exception:
+        return cached
+    if pol != cached:
+        config["_mod_policy"] = pol
+        save_config(config)
+    return pol
+
+
 # ── 마인크래프트 경로 ────────────────────────────────────────────────────────
 
 def find_minecraft_dir(config: dict | None = None) -> str | None:

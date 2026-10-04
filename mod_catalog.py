@@ -708,3 +708,60 @@ CATEGORY_COLOR = {
     "한글":  _NEUTRAL,
     "편의":  _NEUTRAL,
 }
+
+
+# ── 원격 모드 정책 (서버 정책 API GET /server-mods 의 dongleland 항목) ──────
+# 허용 모드를 런처 출시 없이 늘리려고, 원격 목록을 이 카탈로그 위에 덮어쓴다.
+# 카탈로그 = 꾸밈(한글 설명·분류·의존성), 원격 = 허용 여부.
+_OTHER = "기타"
+
+
+def apply_policy(policy, fetch_meta):
+    """원격 정책을 카탈로그에 반영한다.
+
+    리스트·딕트는 **제자리 수정** — api.py 가 `from mod_catalog import MODS, ...` 로 들고
+    있는 참조가 그대로 유효해야 한다.
+
+    - 원격 허용(+필수)에만 있는 슬러그 → 새 항목(분류 '기타', 이름은 fetch_meta 의 Modrinth 제목)
+    - curated 인데 허용에 없는 슬러그 모드 → off_policy (목록에서 빠짐. 설치돼 있으면 api 가 남김)
+    - 금지 슬러그 → banned + off_policy (경고만, 자동 삭제 안 함)
+    - 슬러그 없는 번들 모드는 건드리지 않는다
+    fetch_meta(slugs) -> {slug: {"title": ...}} — 실패해도 슬러그 이름으로 만든다.
+    """
+    if not isinstance(policy, dict):
+        return
+    required = {r if isinstance(r, str) else (r or {}).get("id")
+                for r in policy.get("required_mods") or []}
+    allowed = set(policy.get("allowed_mods") or []) | (required - {None})
+    banned = set(policy.get("banned_mods") or [])
+    curated = policy.get("mod_policy") == "curated"
+
+    known = {m["slug"] for m in MODS if m.get("slug")}
+    unknown = sorted((allowed | banned) - known)
+    try:
+        meta = fetch_meta(unknown) if unknown else {}
+    except Exception:
+        meta = {}
+    for slug in unknown:
+        if slug in MOD_BY_ID:          # 다른 모드의 id 와 겹치면 건너뜀(오탐 방지)
+            continue
+        MODS.append({
+            "id": slug, "name": (meta.get(slug) or {}).get("title") or slug,
+            "slug": slug, "bundled_asset": None, "category": _OTHER,
+            "required": False, "tags": [_OTHER], "description": "",
+            "exclusive_group": None, "dependencies": [], "hidden": False,
+        })
+
+    for m in MODS:
+        s = m.get("slug")
+        if not s:
+            continue
+        m["banned"] = s in banned
+        m["off_policy"] = s in banned or (curated and s not in allowed)
+
+    MOD_BY_ID.clear()
+    MOD_BY_ID.update({m["id"]: m for m in MODS})
+    VISIBLE_MODS[:] = [m for m in MODS if not m.get("hidden", False)]
+    if any(m["category"] == _OTHER for m in MODS) and _OTHER not in CATEGORIES:
+        CATEGORIES.append(_OTHER)
+        CATEGORY_COLOR[_OTHER] = _NEUTRAL

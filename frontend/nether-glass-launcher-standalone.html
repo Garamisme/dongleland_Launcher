@@ -867,6 +867,11 @@ function libRowHTML(m,kind){const s=stOf(m);
       +'<button class="btn btn--danger btn--sm" data-modrm="'+esc(m.title)+'" data-id="'+esc(m.id||"")+'">'+ic("trash-2",16)+'제거</button>'
     +'</div>'
   +'</div>';}
+/* 서버가 금지한 모드가 설치돼 있으면 알린다. 지우는 건 사용자 몫(라이브러리에 '서버 금지' 뱃지로 남음) */
+function warnBannedMods(){
+  const b=DATA.mods.filter(m=>m._banned && (stOf(m)==="installed"||stOf(m)==="update"));
+  if(b.length) flash("서버에서 금지한 모드가 설치돼 있어요: "+b.map(m=>m.title).join(", ")+" — 접속이 거부될 수 있어요. 라이브러리에서 제거해주세요");
+}
 /* 카탈로그 밖에서 mods 폴더에 직접 넣은 jar — 이름·버전 정보가 없어 파일명으로 보여준다 */
 function extraModRowHTML(x){
   return '<div class="librow" style="cursor:default">'
@@ -884,7 +889,8 @@ function extraModRowHTML(x){
 async function extraModDelete(filename){
   if(!Bridge.live){ flash("이 미리보기에서는 비활성화되어 있습니다"); return; }
   try{ const r=await Bridge.api.remove_extra_mod(filename);
-    if(r&&r.ok){ state.extraMods=(state.extraMods||[]).filter(x=>x.filename!==filename); flash("모드를 제거했습니다"); if(state.nav==="library") renderScreen(false); }
+    if(r&&r.ok){ state.extraMods=(state.extraMods||[]).filter(x=>x.filename!==filename); flash("모드를 제거했습니다");
+      if(state.nav==="library"){ const sc=document.querySelector(".screen"), y=sc?sc.scrollTop:0; renderScreen(false); const sc2=document.querySelector(".screen"); if(sc2) sc2.scrollTop=y; } }
     else flash((r&&r.message)||"제거하지 못했습니다"); }
   catch(e){ flash("제거하지 못했습니다"); }
 }
@@ -1806,6 +1812,7 @@ const GRAD = [
 function gradientFor(id){let h=0;for(let i=0;i<id.length;i++)h=(h*31+id.charCodeAt(i))>>>0;return GRAD[h%GRAD.length];}
 function buildBadges(m){
   const b=[{label:"Fabric",tone:"grass"}];
+  if(m.banned)b.push({label:"서버 금지",tone:"redstone"});
   if(m.required)b.push({label:"필수",tone:"gold"});
   else b.push({label:m.category,tone:"neutral"});
   return b;
@@ -1838,6 +1845,7 @@ function applyCatalog(cat){
       _deps:m.dependencies||[],
       _group:m.exclusive_group||null,
       _hasSlug:!!m.has_slug,
+      _banned:!!m.banned,
       _kind:"mod",
     });
   });
@@ -2228,7 +2236,8 @@ async function continueBoot(){
     applyVersions(ver);
     // 설치된 모드 개수가 정확해질 때까지(스캔 완료) 로딩 화면을 유지한다.
     const scan = await Bridge.api.scan_mods();
-    if(scan && scan.ok){ applyStatuses(scan.statuses, scan.versions); state.extraMods=scan.extra||[];  if(scan.lookup_ok===false) flash("모드 정보를 확인하지 못했어요 — 마지막으로 확인된 설치 상태로 표시합니다"); }
+    if(scan && scan.ok){ applyStatuses(scan.statuses, scan.versions); state.extraMods=scan.extra||[];  if(scan.lookup_ok===false) flash("모드 정보를 확인하지 못했어요 — 마지막으로 확인된 설치 상태로 표시합니다");
+      warnBannedMods(); }
     else if(scan && scan.reason){ flash(scan.reason); }
     state.booting=false;          // 스캔까지 끝난 뒤 실제 런처 렌더
     renderAll();

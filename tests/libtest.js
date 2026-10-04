@@ -23,5 +23,10 @@ setTimeout(async()=>{
   const ext=$$('[data-extrarm]');
   console.log("직접 추가한 모드 행:", ext.length===1 && ext[0].getAttribute("data-extrarm")==="my-mod.jar" ? "✅" : "❌ "+ext.length);
   console.log("섹션 제목:", d.body.textContent.includes("직접 추가한 모드") ? "✅" : "❌ 없음");
+  // 서버가 금지한 모드가 설치돼 있으면 경고 (경고만)
+  const bm=mods[1]; bm._banned=true; w.eval('applyStatuses')({[bm.id]:"installed"},{});
+  w.eval('warnBannedMods')(); await sleep(50);
+  const fx=d.body.textContent;
+  console.log("금지 모드 경고:", fx.includes("서버에서 금지한 모드") && fx.includes(bm.title) ? "✅" : "❌");
   process.exit(0);
 },600);

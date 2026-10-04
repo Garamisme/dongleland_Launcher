@@ -597,15 +597,31 @@ class Api:
         return {"ready": True, "minecraft_dir": mc_dir, "mods_dir": mods_dir}
 
     def get_catalog(self):
-        """정적 모드 카탈로그 반환 (네트워크 없음, 즉시).
+        """모드 카탈로그 반환. 프로세스 첫 호출에서만 원격 허용 정책을 1회 받아 덮어쓴다(5초 타임아웃).
 
         UI 최초 렌더용. 설치 상태(status)는 아직 모르므로 넣지 않는다.
         상태는 scan_mods() 로 뒤이어 채운다.
         각 항목: id, name, category, required, tags, description,
                  exclusive_group, dependencies, has_slug
         """
+        if not getattr(self, "_policy_applied", False):
+            # 허용 모드 원격 목록 → 카탈로그에 덮어쓰기 (실패 시 마지막 성공값/카탈로그 그대로)
+            self._policy_applied = True
+            pol = preflight.fetch_mod_policy(self._config)
+            mod_catalog.apply_policy(pol, modrinth_api.get_projects_media_batch)
+        if not self._registry:
+            self.ensure_ready()
+
+        def _listed(m):
+            # 정책에서 빠진 모드는 목록에서 뺀다. 이미 설치돼 있으면 남겨서 제거할 수 있게.
+            if not m.get("off_policy"):
+                return True
+            return bool(self._registry and self._registry.is_installed(m["id"]))
+
         items = []
         for m in VISIBLE_MODS:
+            if not _listed(m):
+                continue
             items.append({
                 "id": m["id"],
                 "name": m["name"],
@@ -619,6 +635,7 @@ class Api:
                 "author": m.get("author"),
                 "size_label": m.get("size_label"),
                 "version": m.get("version"),
+                "banned": bool(m.get("banned")),
             })
         return {
             "mods": items,
