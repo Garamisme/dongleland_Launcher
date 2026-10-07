@@ -57,24 +57,15 @@ def auth_rules():
         fails.append("토큰 갱신")
 
 
-def scan_rules():
-    step("모드 스캔 규칙")
+def py_rules(title, script, label):
+    """네트워크 없이 도는 파이썬 규칙 테스트 하나."""
+    step(title)
     env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
-    r = subprocess.run([sys.executable, os.path.join(TESTS, "scantest.py")],
+    r = subprocess.run([sys.executable, os.path.join(TESTS, script)],
                        capture_output=True, text=True, env=env, timeout=120)
     print(r.stdout.strip() or r.stderr.strip()[:400])
     if r.returncode:
-        fails.append("모드 스캔")
-
-
-def policy_rules():
-    step("원격 허용 모드 정책")
-    env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
-    r = subprocess.run([sys.executable, os.path.join(TESTS, "policytest.py")],
-                       capture_output=True, text=True, env=env, timeout=120)
-    print(r.stdout.strip() or r.stderr.strip()[:400])
-    if r.returncode:
-        fails.append("허용 모드 정책")
+        fails.append(label)
 
 
 def contract():
@@ -150,8 +141,9 @@ def suites():
 if __name__ == "__main__":
     compile_backend()
     auth_rules()
-    scan_rules()
-    policy_rules()
+    py_rules("모드 스캔 규칙", "scantest.py", "모드 스캔")
+    py_rules("원격 허용 모드 정책", "policytest.py", "허용 모드 정책")
+    py_rules("WebView2 없는 PC 안내", "webview2test.py", "WebView2 안내")
     contract()
     js_and_dupes()
     suites()

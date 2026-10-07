@@ -23,6 +23,44 @@ def _resource(rel: str) -> str:
     return os.path.join(base, rel)
 
 
+# Microsoft 공식 WebView2 Evergreen 부트스트래퍼(설치 파일이 바로 내려받아진다)
+WEBVIEW2_DOWNLOAD = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+
+
+def _webview2_missing() -> bool:
+    """WebView2 런타임이 없어 pywebview 가 IE(MSHTML)로 대체할 상황인가.
+
+    pywebview 는 이때 경고 로그만 남기고 IE 로 창을 띄우는데, 우리 화면은 IE 에서 돌지 않아
+    흰 창만 남는다. 판정은 pywebview 자신의 것(winforms.is_chromium)을 그대로 쓴다 —
+    .NET 버전·채널·최소 버전까지 따지는 로직을 복제하면 언젠가 어긋난다.
+    판정 자체가 실패하면 False: 오탐으로 런처를 막지 않는다.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        from webview.platforms import winforms
+        return not winforms.is_chromium
+    except Exception:
+        return False
+
+
+def _show_webview2_help():
+    """설치 안내 메시지 상자. [예] → 공식 설치 파일 다운로드."""
+    import ctypes
+    import webbrowser
+    msg = ("런처 화면을 표시하는 데 필요한 Microsoft Edge WebView2 런타임이 "
+           "이 PC 에 설치되어 있지 않습니다.\n\n"
+           "[예]를 누르면 Microsoft 공식 설치 파일이 내려받아집니다.\n"
+           "설치한 뒤 런처를 다시 실행해주세요.")
+    MB_YESNO, MB_ICONWARNING, IDYES = 0x4, 0x30, 6
+    try:
+        r = ctypes.windll.user32.MessageBoxW(None, msg, "동글랜드 런처", MB_YESNO | MB_ICONWARNING)
+    except Exception:
+        r = IDYES
+    if r == IDYES:
+        webbrowser.open(WEBVIEW2_DOWNLOAD)
+
+
 def main():
     # Windows 작업표시줄 아이콘 그룹화 (tkinter 판과 동일 로직)
     try:
@@ -32,6 +70,10 @@ def main():
         )
     except Exception:
         pass
+
+    if _webview2_missing():
+        _show_webview2_help()
+        return
 
     api = Api()
 
