@@ -25,7 +25,7 @@ HTML = os.path.join(ROOT, "frontend", "nether-glass-launcher-standalone.html")
 SUITES = [
     "e2e.js", "boot2.js", "modui.js", "libtest.js", "vertest.js",
     "vermenu.js", "fix5.js", "scroll.js", "upd.js", "terms.js",
-    "logo.js", "canceltest.js", "memtest.js", "beta.js", "skinmodal.js",
+    "logo.js", "canceltest.js", "memtest.js", "beta.js", "skinmodal.js", "taskui.js",
 ]
 
 fails = []
@@ -144,6 +144,7 @@ if __name__ == "__main__":
     py_rules("모드 스캔 규칙", "scantest.py", "모드 스캔")
     py_rules("원격 허용 모드 정책", "policytest.py", "허용 모드 정책")
     py_rules("WebView2 없는 PC 안내", "webview2test.py", "WebView2 안내")
+    py_rules("Fabric·Java 취소", "tasktest.py", "작업 취소")
     contract()
     js_and_dupes()
     suites()

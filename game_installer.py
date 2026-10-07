@@ -387,6 +387,12 @@ def runtime_info() -> dict:
 
     name = info["name"]
     path = _runtime.get_executable_path(name, mc_dir)
+    # mll 은 모든 파일을 받은 뒤 마지막에 <platform>/.version 을 쓴다. java.exe 만 있고
+    # 이게 없으면 받다 만(취소·네트워크 끊김) 런타임 → 설치 안 된 것으로 본다.
+    # 경로: runtime/<name>/<platform>/<name>/bin/java(.exe) 에서 세 단계 위.
+    if path and not os.path.isfile(os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(path))), ".version")):
+        path = None
     return {"ok": True, "name": name,
             "major": info.get("javaMajorVersion"),
             "installed": bool(path), "path": path}
@@ -439,11 +445,15 @@ def ensure_runtime(on_progress=None) -> dict:
         return ri
     if ri.get("installed"):
         return ri
+    clear_cancel()
     preflight.write_log(f"[런타임설치] 시작 name={ri.get('name')} major={ri.get('major')}")
     mc_dir = instance.instance_dir()
     cb = _make_callback(on_progress, base=0, span=99)
     try:
         _runtime.install_jvm_runtime(ri["name"], mc_dir, callback=cb)
+    except InstallCancelled:
+        preflight.write_log("[런타임설치취소]")
+        raise
     except Exception as e:
         preflight.write_log(f"[런타임설치실패] {type(e).__name__}: {e}")
         raise InstallError(f"Java 런타임 설치에 실패했습니다:\n{e}")

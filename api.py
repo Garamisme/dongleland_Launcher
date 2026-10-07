@@ -1703,9 +1703,12 @@ class Api:
                     _push("error", {"message": "먼저 게임을 설치해주세요."})
                     return
                 game_installer.ensure_runtime(
-                    on_progress=lambda pct, msg: _push("progress", {"pct": pct, "msg": str(msg)}))
+                    on_progress=lambda pct, msg, detail=None: _push(
+                        "progress", {"pct": pct, "msg": str(msg), "detail": detail or {}}))
                 preflight.invalidate_java_cache()
                 _push("done", preflight.check_java_status())
+            except game_installer.InstallCancelled:
+                _push("cancelled", {"message": "Java 설치를 취소했습니다."})
             except Exception as e:
                 msg = getattr(e, "message", None) or str(e)
                 _push("error", {"message": msg})
@@ -2000,6 +2003,9 @@ class Api:
                 r = game_installer.update_loader(on_progress=_push)
                 if r.get("unchanged"):
                     _push(100, "이미 최신 로더입니다", {"stage":"완료","stage_no":4,"stage_total":4,"cur":0,"max":0,"raw":"done"})
+            except game_installer.InstallCancelled:
+                # -2 = 취소 (게임 설치 onClientInstall 과 같은 약속). 상태 전환 전에 멈추므로 옛 로더 그대로.
+                _push(-2, "Fabric 업데이트를 취소했습니다")
             except Exception as e:
                 msg = getattr(e, "message", None) or str(e)
                 _push(-1, msg)
@@ -2129,7 +2135,8 @@ class Api:
         try:
             import game_installer
             busy = (getattr(self, "_client_installing", False)
-                    or getattr(self, "_fabric_updating", False))
+                    or getattr(self, "_fabric_updating", False)
+                    or getattr(self, "_java_installing", False))
             if not busy:
                 return {"ok": False, "message": "진행 중인 작업이 없습니다."}
             game_installer.request_cancel()

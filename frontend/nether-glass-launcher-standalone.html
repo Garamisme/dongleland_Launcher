@@ -717,6 +717,7 @@ const state={
   skinResetArmed:false, // 기본 스킨 초기화 2단계
   launchBusy:false,     // 실행 버튼 잠금
   fabricUpdating:false, // Fabric 로더 업데이트 진행 중
+  task:null,            // 설정 화면 진행 작업 {kind:"fabric"|"java", pct, detail, cancelling}
   mem:null,             // 할당 메모리 {alloc_mb,total_mb,min_mb,max_mb,recommended_mb}
   verMenu:null,         // 버전 드롭다운이 열린 항목 id
   verList:{},           // id → {versions:[...]} | {error:"..."}
@@ -890,7 +891,7 @@ async function extraModDelete(filename){
   if(!Bridge.live){ flash("이 미리보기에서는 비활성화되어 있습니다"); return; }
   try{ const r=await Bridge.api.remove_extra_mod(filename);
     if(r&&r.ok){ state.extraMods=(state.extraMods||[]).filter(x=>x.filename!==filename); flash("모드를 제거했습니다");
-      if(state.nav==="library"){ const sc=document.querySelector(".screen"), y=sc?sc.scrollTop:0; renderScreen(false); const sc2=document.querySelector(".screen"); if(sc2) sc2.scrollTop=y; } }
+      if(state.nav==="library") rerenderKeepScroll(); }
     else flash((r&&r.message)||"제거하지 못했습니다"); }
   catch(e){ flash("제거하지 못했습니다"); }
 }
@@ -988,7 +989,7 @@ function systemScreen(){
       +acctCardHTML()
       +'<div class="tile" style="padding:6px 22px 10px">'
         +'<div style="display:flex;align-items:center;gap:8px;padding:14px 0 4px">'+ic("git-branch",16)+'<span class="eyebrow">버전 및 업데이트</span></div>'
-        +DATA.system.map(verRow).join("")
+        +DATA.system.map(v=>verRow(v)+(state.task&&state.task.kind===v.id?taskPanelHTML():"")).join("")
         +'<div style="padding-top:14px"><button class="btn btn--sm" data-act="check-updates">'+ic("refresh-cw",16)+'업데이트 확인</button></div>'
       +'</div>'
       +memCardHTML()
@@ -1618,7 +1619,7 @@ document.addEventListener("click",function(e){
   if(state.verMenu && !e.target.closest('[data-ver="menu"]') && !e.target.closest(".ver-menu")){
     const id=state.verMenu; state.verMenu=null; refreshModalActionById(id);
   }
-  const t=e.target.closest("[data-nav],[data-cat],[data-install],[data-open],[data-close-modal],[data-close-update],[data-update-install],[data-theme-set],[data-update],[data-flash],[data-libfilter],[data-launch],[data-verchip],[data-act],[data-rp],[data-content],[data-project],[data-gate],[data-acct],[data-client],[data-skin],[data-skinm],[data-ver],[data-mem],[data-modrm],[data-extrarm],[data-appset],#theme-steve,.wc");
+  const t=e.target.closest("[data-nav],[data-cat],[data-install],[data-open],[data-close-modal],[data-close-update],[data-update-install],[data-theme-set],[data-update],[data-flash],[data-libfilter],[data-launch],[data-verchip],[data-act],[data-rp],[data-content],[data-project],[data-gate],[data-acct],[data-client],[data-skin],[data-skinm],[data-ver],[data-mem],[data-modrm],[data-extrarm],[data-task],[data-appset],#theme-steve,.wc");
   if(!t)return;
   /* 오버레이 배경 클릭만 '닫기'로 취급 — 모달 내부(data-stop) 클릭이
      closest 로 오버레이까지 번져 닫히는 것 방지 (v2.1 잠복 버그 수정) */
@@ -1681,6 +1682,7 @@ document.addEventListener("click",function(e){
     return;
   }
   if(t.hasAttribute("data-modrm")){e.stopPropagation();doRemove(t.getAttribute("data-modrm"));return;}
+  if(t.hasAttribute("data-task")){e.stopPropagation();doTaskCancel();return;}
   if(t.hasAttribute("data-extrarm")){e.stopPropagation();extraModDelete(t.getAttribute("data-extrarm"));return;}
   if(t.hasAttribute("data-install")){e.stopPropagation();doInstall(t.getAttribute("data-install"));return;}
   if(t.hasAttribute("data-update")){
@@ -1692,10 +1694,12 @@ document.addEventListener("click",function(e){
       if(!Bridge.live){ flash("이 미리보기에서는 비활성화되어 있습니다"); return; }
       const jv=state.javaStatus||{};
       // v3: Mojang 공식 런타임만 설치 (최신 LTS 교체 개념 폐기)
+      if(state.task) return;
       state.javaInstalling=true;
-      flash("게임에 맞는 Java 런타임을 받는 중…");
-      const btn=t; btn.setAttribute("disabled",""); btn.style.opacity=".6";
-      Bridge.api.install_java_async();
+      taskStart("java");
+      Bridge.api.install_java_async().then(r=>{
+        if(!r||!r.started){ state.javaInstalling=false; flash((r&&r.message)||"Java 설치를 시작할 수 없습니다"); taskEnd(); }
+      }).catch(e=>{ state.javaInstalling=false; flash("Java 설치 오류: "+e); taskEnd(); });
       return;
     }else if(upid==="fabric"){
       doFabricUpdate();
@@ -2116,11 +2120,14 @@ function startPreflight(qc){
 window.onJavaInstall = function(phase, payload){
   payload = payload || {};
   if(phase==="progress"){
-    const pct = Math.round(payload.pct||0);
     // 설치 마법사(UAC) 없이 인스턴스 안에 바로 내려받는다
-    flash("Java 런타임 내려받는 중… "+pct+"%");
-  }else if(phase==="done"){
+    taskProgress(payload.pct, payload.detail);
+  }else if(phase==="cancelled"){
     state.javaInstalling=false;
+    flash(payload.message||"Java 설치를 취소했습니다");
+    taskEnd();
+  }else if(phase==="done"){
+    state.javaInstalling=false; state.task=null;
     state.javaStatus=payload;
     const st=payload.status;
     if(st==="managed") flash("Java 런타임 준비 완료 — 게임 실행 가능");
@@ -2132,7 +2139,7 @@ window.onJavaInstall = function(phase, payload){
   }else if(phase==="error"){
     state.javaInstalling=false;
     flash("Java 설치 오류: "+(payload.message||"알 수 없는 오류"));
-    if(state.nav==="system") renderScreen(false);
+    taskEnd();
   }
 };
 
@@ -3200,9 +3207,47 @@ async function reloadVersions(){
 
 /* ── Fabric 로더 업데이트 ─────────────────────────────────────────────
    설정탭 Fabric 행의 버튼 → 백그라운드 갱신 → 진행률을 그 행에 표시. */
-function fabricRowSet(html){
-  const el=document.querySelector('.ver-status[data-verid="fabric"]');
-  if(el) el.innerHTML=html;
+/* 설정 화면 진행 작업(Fabric 업데이트 · Java 설치) — 게임 설치 카드와 같은 진행바·단계·취소.
+   진행 이벤트는 값만 제자리 갱신하고, 패널이 생기고 없어질 때만 다시 그린다. */
+function taskIdle(t){ return t.kind==="java"?"Java 런타임 내려받는 중…":"Fabric 로더 준비 중…"; }
+function taskPanelHTML(){
+  const t=state.task, pct=Math.max(0,Math.min(100,t.pct||0));
+  const note=t.kind==="java"?"취소하면 받은 파일은 다음에 이어서 씁니다":"취소하면 지금 쓰던 로더가 그대로 남아요";
+  return '<div style="padding:2px 0 14px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">'
+      +'<span id="tk-msg" style="font-size:var(--text-sm);color:var(--text-body)">'+esc(ciStageText(t.detail,taskIdle(t)))+'</span>'
+      +'<span class="mono" id="tk-pct" style="font-size:var(--text-sm);color:var(--text-strong)">'+pct+'%</span></div>'
+    +'<div class="ci-sub mono" id="tk-sub">'+esc(ciCountText(t.detail))+'</div>'
+    +'<div class="ci-bar"><span id="tk-bar" style="width:'+pct+'%"></span></div>'
+    +'<div class="ci-foot"><span style="font-size:var(--text-2xs);color:var(--text-faint)">'+note+'</span>'
+      +'<button class="btn btn--ghost btn--sm" data-task="cancel"'+(t.cancelling?' disabled':'')+'>'+(t.cancelling?'취소하는 중…':'취소')+'</button></div>'
+  +'</div>';
+}
+function rerenderKeepScroll(){
+  const sc=document.querySelector(".screen"), y=sc?sc.scrollTop:0;
+  renderScreen(false);
+  const sc2=document.querySelector(".screen"); if(sc2) sc2.scrollTop=y;
+}
+function taskStart(kind){ state.task={kind,pct:0,detail:null,cancelling:false}; if(state.nav==="system") rerenderKeepScroll(); }
+function taskEnd(){ state.task=null; if(state.nav==="system") rerenderKeepScroll(); }
+function taskProgress(pct,detail){
+  const t=state.task; if(!t) return;
+  t.pct=Math.max(0,Math.min(100,Math.round(pct||0))); if(detail) t.detail=detail;
+  const bar=document.getElementById("tk-bar");
+  if(!bar){ if(state.nav==="system") rerenderKeepScroll(); return; }
+  bar.style.width=t.pct+"%";
+  document.getElementById("tk-pct").textContent=t.pct+"%";
+  document.getElementById("tk-msg").textContent=ciStageText(t.detail,taskIdle(t));
+  document.getElementById("tk-sub").textContent=ciCountText(t.detail);
+}
+async function doTaskCancel(){
+  const t=state.task; if(!t||t.cancelling) return;
+  t.cancelling=true;
+  const b=document.querySelector('[data-task="cancel"]'); if(b){ b.disabled=true; b.textContent="취소하는 중…"; }
+  try{
+    const r=await V3().cancel_install();
+    if(!r||!r.ok){ t.cancelling=false; flash((r&&r.message)||"취소할 수 없습니다"); if(state.nav==="system") rerenderKeepScroll(); }
+  }catch(e){ t.cancelling=false; flash("취소 오류: "+e); }
 }
 async function doFabricUpdate(){
   if(state.fabricUpdating) return;
@@ -3214,18 +3259,18 @@ async function doFabricUpdate(){
   // 게임 실행 중이면 파일이 잠겨 실패하므로 미리 막는다.
   if(state.gameRunning){ flash("마인크래프트를 종료한 뒤 업데이트해주세요"); return; }
   state.fabricUpdating=true;
-  fabricRowSet('<span class="badge" data-tone="diamond">0%</span>');
+  taskStart("fabric");
   try{
     const r=await V3().update_fabric_async();
     if(!r || !r.started){
       state.fabricUpdating=false;
       flash((r&&r.message)||"업데이트를 시작할 수 없습니다");
-      if(state.nav==="system") renderScreen(false);
+      taskEnd();
     }
   }catch(e){
     state.fabricUpdating=false;
     flash("업데이트 오류: "+e);
-    if(state.nav==="system") renderScreen(false);
+    taskEnd();
   }
 }
 /* ── 실행 전 파일 검증 진행 (백엔드 verify_and_repair) ──────────────────
@@ -3251,14 +3296,12 @@ function refreshLaunchBtn(){
 /* ── 설치 진행 표시: 단계 + 실제 파일 수 (퍼센트 억지 추정 대신) ─────────
    NN/g: 정확한 추정이 어려우면 완료/남은 단계를 보여주고 현재 단계를 표시하라.
    또 오래 걸리는 작업에는 반드시 중단 수단을 준다. */
-function ciStageText(){
-  const d=state.clientDetail;
-  if(!d || !d.stage) return "게임 파일 준비 중…";
+function ciStageText(d=state.clientDetail, idle="게임 파일 준비 중…"){
+  if(!d || !d.stage_no) return idle;
   const no=d.stage_no||0, tot=d.stage_total||4;
   return d.stage + (no? " ("+no+"/"+tot+" 단계)" : "");
 }
-function ciCountText(){
-  const d=state.clientDetail;
+function ciCountText(d=state.clientDetail){
   if(!d || !d.max) return "";
   return (d.cur||0).toLocaleString()+" / "+d.max.toLocaleString()+" 파일";
 }
@@ -3285,24 +3328,20 @@ window.onLaunchPrep=function(pct,msg,detail){
 };
 
 window.onFabricUpdate=async function(pct,msg,detail){
-  if(pct<0){
+  if(pct<0){                       // -2 = 사용자 취소(옛 로더 유지), 그 외 음수 = 실패
     state.fabricUpdating=false;
-    flash(msg||"Fabric 업데이트에 실패했습니다");
-    if(state.nav==="system") renderScreen(false);
+    flash(msg||(pct===-2?"Fabric 업데이트를 취소했습니다":"Fabric 업데이트에 실패했습니다"));
+    taskEnd();
     return;
   }
   // pct 는 단계 내 퍼센트 → 완료는 detail.raw==="done" 으로만 판단
   const done = !!(detail && detail.raw==="done") || (!detail && pct>=100);
-  if(!done){
-    const label = (detail && detail.stage) ? detail.stage : pct+"%";
-    fabricRowSet('<span class="badge" data-tone="diamond">'+esc(label)+'</span>');
-    return;
-  }
-  state.fabricUpdating=false;
+  if(!done){ taskProgress(pct,detail); return; }
+  state.fabricUpdating=false; state.task=null;
   flash(msg||"Fabric 로더를 최신으로 업데이트했습니다");
   await reloadVersions();      // 설정탭 Fabric 행 = 새 버전 + '최신' 뱃지
   refreshClient();             // 새 version_id 반영
-  if(state.nav==="system") renderScreen(false);
+  if(state.nav==="system") rerenderKeepScroll();
 };
 
 window.onClientInstall=async function(pct,msg,detail){
