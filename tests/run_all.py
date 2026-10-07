@@ -25,7 +25,7 @@ HTML = os.path.join(ROOT, "frontend", "nether-glass-launcher-standalone.html")
 SUITES = [
     "e2e.js", "boot2.js", "modui.js", "libtest.js", "vertest.js",
     "vermenu.js", "fix5.js", "scroll.js", "upd.js", "terms.js",
-    "logo.js", "canceltest.js", "memtest.js", "beta.js",
+    "logo.js", "canceltest.js", "memtest.js", "beta.js", "skinmodal.js",
 ]
 
 fails = []

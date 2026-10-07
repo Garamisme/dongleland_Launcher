@@ -708,7 +708,7 @@ const state={
   rpModal:null,         // 리소스팩 모달 {mode:"font"|"zip", file:{name,b64}|null, busy}
   skin:null,            // 현재 적용된 스킨 {variant,url,default} — 3D 뷰어용
   skinLib:{used_id:null,items:[]}, // 스킨 라이브러리
-  skinCapes:[],         // 계정 보유 망토 [{id,name,active}]
+  skinCapes:null,       // 계정 보유 망토 [{id,name,active}] — null=아직 안 받음, []=망토 없음
   skinModal:null,       // {mode:"add"|"edit", id?, name, variant, cape_id, file:{path,data_url,filename}|null}
   skinBust:0,           // 렌더 이미지 캐시 무효화
   skinBusy:false,       // 적용/저장 진행 중
@@ -2834,7 +2834,7 @@ async function acctAction(k){
     if(!state.logoutArmed){ armFirefly("logoutArmed",'[data-acct="logout"]',"한 번 더 누르면 로그아웃됩니다"); return; }
     disarmFirefly("logoutArmed",'[data-acct="logout"]'); state.acctOpen=false;
     try{ await V3().auth_logout(); }catch(_){}
-    state.auth={logged_in:false}; state.client=null;
+    state.auth={logged_in:false}; state.client=null; state.skinCapes=null;
     renderAcct(); renderAll(); showGate("idle"); flash("로그아웃했습니다");
     return;
   }
@@ -3098,6 +3098,7 @@ async function gatePollOnce(){
   }
 }
 async function afterLogin(){
+  state.skinCapes=null;   // 망토는 계정 소유 — 전환·로그인마다 새 계정 것으로 다시 받는다
   if(Bridge.live){ await bootMain(); }   // 실백엔드: 남은 부트(점검/카탈로그/스캔) 이어감
   else { renderAll(); refreshClient(); refreshSkinLib(); } // 미리보기: 화면만 갱신
 }
@@ -3602,19 +3603,22 @@ function updateSkinModalPreview(){
     else { b.setAttribute("disabled",""); b.style.opacity=".55"; }
   });
 }
+function capeGridHTML(m){
+  const capes=[{id:"",name:"망토 없음",url:null}].concat(state.skinCapes||[]);
+  return capes.map(c=>{
+    const sel=(m.cape_id||"")===(c.id||"");
+    const inner=c.id?capeFrontHTML(c.url,60)
+      :'<span style="display:flex;align-items:center;justify-content:center;width:38px;height:60px;color:var(--text-faint)">'+ic("x",16)+'</span>';
+    return '<button class="cape-opt'+(sel?' cape-opt--sel':'')+'" data-skinm="cape" data-cape="'+esc(c.id||"")+'" title="'+esc(c.name)+'">'+inner+'</button>';
+  }).join("");
+}
 function renderSkinModal(){
   const root=document.getElementById("skin-modal-root"); if(!root)return;
   const m=state.skinModal;
   if(!m){ root.innerHTML=""; return; }
   const dataUrl=m.file?m.file.data_url:(m.data_url||null);
   const seg=(id,label)=>'<button class="tab" data-active="'+(m.variant===id)+'" data-skinm="variant-'+id+'">'+label+'</button>';
-  const capes=[{id:"",name:"망토 없음",url:null}].concat(state.skinCapes||[]);
-  const capeGrid=capes.map(c=>{
-    const sel=(m.cape_id||"")===(c.id||"");
-    const inner=c.id?capeFrontHTML(c.url,60)
-      :'<span style="display:flex;align-items:center;justify-content:center;width:38px;height:60px;color:var(--text-faint)">'+ic("x",16)+'</span>';
-    return '<button class="cape-opt'+(sel?' cape-opt--sel':'')+'" data-skinm="cape" data-cape="'+esc(c.id||"")+'" title="'+esc(c.name)+'">'+inner+'</button>';
-  }).join("");
+  const capeGrid=capeGridHTML(m);
   const fileLabel=m.file?m.file.filename:(m.mode==="edit"?"기존 파일 유지":"64x64 PNG · 24KB 이하");
   const canSave=m.mode==="edit"||!!m.file;
   root.innerHTML='<div class="overlay" data-skinm="close"><div class="modal" data-stop="1" style="width:min(640px,94vw);grid-template-rows:auto">'
@@ -3633,7 +3637,7 @@ function renderSkinModal(){
             +'<div style="display:flex;align-items:center;gap:10px;min-width:0"><button class="btn btn--sm" data-skinm="pick" style="flex:0 0 auto;white-space:nowrap">'+ic("folder-open",15)+'찾아보기</button>'
             +'<span id="skinm-filelabel" class="mono" style="font-size:var(--text-2xs);color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0" title="'+esc(fileLabel)+'">'+esc(fileLabel)+'</span></div></div>'
           +'<div><div class="eyebrow" style="margin-bottom:8px">망토</div>'
-            +'<div style="display:flex;gap:10px;flex-wrap:wrap">'+capeGrid+'</div></div>'
+            +'<div id="skinm-capes" style="display:flex;gap:10px;flex-wrap:wrap">'+capeGrid+'</div></div>'
         +'</div>'
       +'</div>'
     +'</div>'
@@ -3652,8 +3656,11 @@ async function skinModalOpen(mode,sid){
   }
   renderSkinModal();  // 즉시 표시
   // capes 가 없거나 비어있으면 로드 후 재렌더 (프리로드 성공 시엔 이 경로 스킵)
-  if(!state.skinCapes || state.skinCapes.length===0){
-    try{ const r=await V3().skin_capes(); if(r&&r.ok&&state.skinModal){ state.skinCapes=r.capes||[]; renderSkinModal(); } }catch(_){}
+  // 망토가 도착하면 망토 칸만 갈아끼운다. 모달 전체를 다시 그리면 오버레이가 새로 생겨
+  // 등장 애니메이션이 한 번 더 재생된다(= 껌벅). 빈 배열은 '망토 없음'으로 로드 완료다.
+  if(state.skinCapes==null){
+    try{ const r=await V3().skin_capes(); if(r&&r.ok){ state.skinCapes=r.capes||[];
+      const g=document.getElementById("skinm-capes"); if(g&&state.skinModal) g.innerHTML=capeGridHTML(state.skinModal); } }catch(_){}
   }
 }
 function skinModalCollect(){
@@ -3725,7 +3732,7 @@ async function refreshSkinLib(){
     // 현재 적용된 스킨 정보(variant) — 3D 뷰어가 슬림/와이드 정확히 렌더하도록
     try{ const g=await V3().skin_get(); if(g&&g.ok) state.skin=g; }catch(_){}
     // 망토 목록 미리 로드 → 모달 열 때 재렌더(껌벅) 방지
-    if(!state.skinCapes){ try{ const c=await V3().skin_capes(); if(c&&c.ok) state.skinCapes=c.capes||[]; }catch(_){} }
+    if(state.skinCapes==null){ try{ const c=await V3().skin_capes(); if(c&&c.ok) state.skinCapes=c.capes||[]; }catch(_){} }
     if(state.nav==="skin") renderScreen(false);
   }catch(_){}
 }
