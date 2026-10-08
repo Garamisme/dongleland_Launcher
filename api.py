@@ -21,6 +21,7 @@ v2.1 진행:
     실행하므로 여기서 별도 스레드를 만들지 않아도 UI 가 안 멈춘다.
 """
 
+import filecmp
 import os
 import shutil
 import sys
@@ -676,6 +677,17 @@ class Api:
             mid = mod["id"]
             ba = mod.get("bundled_asset")
             if ba and os.path.isfile(os.path.join(mods_dir, ba)):
+                # 바이트까지 정본이어야 한다 — 서버 모드검사(modcheckclient)는 클라가 자기 jar
+                # 바이트 전체를 HMAC 으로 서명해 보내게 해서, 이름·버전이 같아도 바이트가 다르면
+                # "잘못된 핸드셰이크 응답"으로 추방된다. 다르면 번들본으로 덮어 복구한다.
+                src = _resource(os.path.join("assets", ba))
+                dst = os.path.join(mods_dir, ba)
+                if os.path.isfile(src) and not filecmp.cmp(src, dst, shallow=False):
+                    try:
+                        shutil.copyfile(src, dst)
+                        preflight.write_log(f"[복구] 번들 모드 {ba} 가 정본과 달라 다시 배치")
+                    except OSError as e:
+                        preflight.write_log(f"[복구실패] {ba}: {e}")
                 if not self._registry.is_installed(mid):
                     self._registry.record_install(mid, ba, "1.2.0", None)
             self._mod_statuses[mid] = (

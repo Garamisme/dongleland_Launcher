@@ -99,6 +99,23 @@ check("조회 성공: 사라진 모드만 기록에서 제거", a._registry.is_i
 check("조회 성공: lookup_ok=True", r.get("lookup_ok") is True)
 check("조회 성공: 주인 없는 jar 는 extra", extra_names(r) == ["b.jar", "external.jar"])
 
+# ── 2b. 번들 모드(ModCheck)는 바이트까지 정본이어야 한다 ─────────────────────
+# 서버 모드검사는 클라이언트가 자기 jar 바이트 전체를 HMAC 으로 서명해 보내게 한다.
+# 이름·버전이 같아도 바이트가 다르면 "잘못된 핸드셰이크 응답"으로 추방된다.
+from mod_catalog import MODS  # noqa: E402
+bundled = next(m for m in MODS if m.get("bundled_asset"))
+src = api._resource(os.path.join("assets", bundled["bundled_asset"]))
+a = make_api()
+dst = os.path.join(a._mods_dir, bundled["bundled_asset"])
+with open(dst, "wb") as f:
+    f.write(b"corrupted or different build")
+a.scan_mods()
+check("번들 모드 바이트가 다르면 정본으로 복구", open(dst, "rb").read() == open(src, "rb").read())
+check("복구 후 설치됨", a._mod_statuses.get(bundled["id"]) == "installed")
+mtime = os.path.getmtime(dst)
+a.scan_mods()
+check("정본이면 다시 쓰지 않음", os.path.getmtime(dst) == mtime)
+
 # ── 3. 직접 추가한 모드 삭제 ────────────────────────────────────────────────
 d = a.remove_extra_mod("external.jar")
 check("extra 삭제: 성공", d.get("ok") is True
