@@ -68,6 +68,35 @@ MODS = [
         "hidden": False,
     },
     {
+        "id": "nvidium",
+        "name": "Nvidium",
+        "slug": "nvidium",
+        "bundled_asset": None,
+        "category": "최적화",
+        "required": False,
+        "tags": ["최적화"],
+        "description": "엔비디아 그래픽카드 전용 렌더러로 원거리 시야에서 FPS를 크게 올립니다.\n"
+                       "⚠ NVIDIA 그래픽카드에서만 동작하며, 아직 베타 버전입니다.\n"
+                       "(Sodium 필요 — 설치 시 자동 설치)",
+        "exclusive_group": None,
+        "dependencies": ["sodium"],
+        "hidden": False,
+    },
+    {
+        "id": "bobby",
+        "name": "Bobby",
+        "slug": "bobby",
+        "bundled_asset": None,
+        "category": "최적화",
+        "required": False,
+        "tags": ["최적화", "시각"],
+        "description": "서버가 보내주는 거리 너머의 지형을 저장해 두고 그려서, 서버 시야 거리보다 멀리 보이게 합니다.\n"
+                       "풍경 감상이나 원거리 확인에 좋습니다.",
+        "exclusive_group": None,
+        "dependencies": [],
+        "hidden": False,
+    },
+    {
         "id": "lithium",
         "name": "Lithium",
         "slug": "lithium",
@@ -173,6 +202,20 @@ MODS = [
     },
 
     # ── 시각 ─────────────────────────────────────────────────────────────
+    {
+        "id": "paperdoll",
+        "name": "Paper Doll",
+        "slug": "paperdoll",
+        "bundled_asset": None,
+        "category": "시각",
+        "required": False,
+        "tags": ["시각", "편의"],
+        "description": "화면 구석에 내 캐릭터를 작게 띄워 지금 모습을 보여줍니다.\n"
+                       "웅크리기·엘리트라·수영처럼 1인칭에서 안 보이는 자세를 확인할 때 좋습니다.",
+        "exclusive_group": None,
+        "dependencies": ["fabric-api"],
+        "hidden": False,
+    },
     {
         "id": "iris",
         "name": "Iris Shaders",
