@@ -19,14 +19,14 @@ setTimeout(async()=>{
   else bad("--font-mono 그대로");
 
   // 3) 셰이더 탭 애니메이션
-  d.querySelector('[data-nav="shaders"]').click(); await sleep(60);
+  w.eval('setNav')("shaders"); await sleep(60);
   const sc=$(".screen");
   if(sc && /anim-(up|down)/.test(sc.className)) ok("셰이더 탭 애니메이션: "+sc.className.trim());
   else bad("셰이더 탭 애니메이션 없음: "+(sc?sc.className:"?"));
   if(typeof w.eval("renderScreenSoon")==="function") ok("renderScreenSoon 존재");
 
   // 4) 모달: 제작자 아이콘 유지 + 설치 즉시 버전 갱신
-  d.querySelector('[data-nav="mods"]').click(); await sleep(300);
+  w.eval('setNav')("mods"); await sleep(300);
   const mods=w.eval('DATA').mods;
   const m0=mods[0];
   w.eval('applyStatuses')({[m0.id]:"installed"},{[m0.id]:{installed:"0.9.1",latest:"0.9.1"}});

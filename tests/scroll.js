@@ -5,7 +5,7 @@ const $=s=>d.querySelector(s);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 setTimeout(async()=>{
   $('[data-gate="begin"]').click(); await sleep(5300);
-  d.querySelector('[data-nav="mods"]').click(); await sleep(300);
+  w.eval('setNav')("mods"); await sleep(300);
   const holder=$("#screen-holder");
   const before=holder.innerHTML.length;
   const nodeBefore=$(".screen");

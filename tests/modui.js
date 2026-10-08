@@ -11,7 +11,7 @@ const fail=m=>{console.log("[FAIL] "+m);fails++;};
 
 setTimeout(async()=>{
   $('[data-gate="begin"]').click(); await sleep(5300);
-  $('[data-nav="mods"]').click(); await sleep(200);
+  w.eval('setNav')("mods"); await sleep(200);
 
   // 백엔드가 준 것처럼 상태+버전 주입
   const mods=w.eval('DATA').mods;

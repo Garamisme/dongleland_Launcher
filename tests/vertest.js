@@ -6,7 +6,7 @@ const click=el=>el.dispatchEvent(new w.MouseEvent("click",{bubbles:true}));
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 setTimeout(async()=>{
   $('[data-gate="begin"]').click(); await sleep(5300);
-  $('[data-nav="mods"]').click(); await sleep(200);
+  w.eval('setNav')("mods"); await sleep(200);
   const cards=[...d.querySelectorAll(".modcard")];
   let opened=false;
   for(const c of cards){
