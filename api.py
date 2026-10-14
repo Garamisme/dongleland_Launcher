@@ -2137,6 +2137,38 @@ class Api:
         except Exception as e:
             return {"ok": False, "message": f"저장에 실패했습니다: {e}"}
 
+    _WINDOW_MODES = ("keep", "windowed", "fullscreen")
+
+    def window_info(self):
+        """게임 창 설정. mode: keep(게임 설정 그대로) / windowed / fullscreen.
+
+        반환: {"ok":True, "mode":str, "width":int, "height":int}
+        """
+        try:
+            cfg = self._config or preflight.load_config()
+            w = cfg.get("window") or {}
+            mode = w.get("mode") if w.get("mode") in self._WINDOW_MODES else "keep"
+            return {"ok": True, "mode": mode,
+                    "width": int(w.get("width") or 1280), "height": int(w.get("height") or 720)}
+        except Exception as e:
+            return {"ok": False, "message": str(e)}
+
+    def set_window(self, mode, width, height):
+        """게임 창 설정 저장. 다음 실행부터 적용된다."""
+        try:
+            if mode not in self._WINDOW_MODES:
+                return {"ok": False, "message": "알 수 없는 창 모드입니다."}
+            w = min(max(int(width), 640), 7680)
+            h = min(max(int(height), 480), 4320)
+            self._config = self._config or preflight.load_config()
+            self._config["window"] = {"mode": mode, "width": w, "height": h}
+            preflight.save_config(self._config)
+            return {"ok": True, "mode": mode, "width": w, "height": h}
+        except (TypeError, ValueError):
+            return {"ok": False, "message": "창 크기는 숫자로 입력해주세요."}
+        except Exception as e:
+            return {"ok": False, "message": f"저장에 실패했습니다: {e}"}
+
     def cancel_install(self):
         """진행 중인 게임 설치 / 검증 / 로더 업데이트를 취소.
 
@@ -2210,11 +2242,13 @@ class Api:
             # 설정된 할당 메모리를 -Xmx 로 적용 (미설정이면 권장값)
             mem = self.memory_info()
             max_mem = mem.get("alloc_mb") if mem.get("ok") else None
+            win = self.window_info()
+            win = win if win.get("ok") else None
             if max_mem:
                 result = launcher.launch(quick_connect=bool(quick_connect),
-                                         max_mem_mb=int(max_mem))
+                                         max_mem_mb=int(max_mem), window=win)
             else:
-                result = launcher.launch(quick_connect=bool(quick_connect))
+                result = launcher.launch(quick_connect=bool(quick_connect), window=win)
         except Exception as e:
             msg = getattr(e, "message", None) or f"게임 실행에 실패했습니다:\n{e}"
             return {"ok": False, "error": getattr(e, "code", "launch_failed"),

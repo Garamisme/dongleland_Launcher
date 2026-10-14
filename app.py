@@ -61,7 +61,40 @@ def _show_webview2_help():
         webbrowser.open(WEBVIEW2_DOWNLOAD)
 
 
+def _print_mc_token(uuid: str) -> int:
+    """`--mc-token <uuid>` — 창 없이 유효한 MC 토큰 한 줄을 stdout 으로 내고 끝난다.
+
+    게임 안 코어가 24시간 넘게 켜져 있을 때 프로필 공개키·서버 접속에 쓸 새 토큰을 받으려고
+    부른다(런처 창이 닫혀 있어도 동작). 토큰은 로그·파일에 남기지 않는다.
+    """
+    import auth
+    try:
+        token = auth.get_token_for(uuid)
+    except Exception as e:
+        auth._log_auth(f"[인증] 게임 토큰 요청 실패: {type(e).__name__}")
+        return 1
+    auth._log_auth("[인증] 게임 토큰 요청 처리")
+    data = (token + "\n").encode("ascii")
+    if sys.platform != "win32":
+        sys.stdout.write(data.decode("ascii"))
+        return 0
+    # 창 모드 exe(console=False)에선 sys.stdout 이 None 일 수 있다 → 상속받은 핸들에 직접 쓴다.
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.windll.kernel32
+    k32.GetStdHandle.restype = wintypes.HANDLE
+    k32.WriteFile.argtypes = [wintypes.HANDLE, ctypes.c_char_p, wintypes.DWORD,
+                              ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
+    written = wintypes.DWORD()
+    ok = k32.WriteFile(k32.GetStdHandle(-11), data, len(data), ctypes.byref(written), None)
+    return 0 if ok else 1
+
+
 def main():
+    if "--mc-token" in sys.argv:
+        i = sys.argv.index("--mc-token")
+        sys.exit(_print_mc_token(sys.argv[i + 1] if i + 1 < len(sys.argv) else ""))
+
     # Windows 작업표시줄 아이콘 그룹화 (tkinter 판과 동일 로직)
     try:
         import ctypes

@@ -35,6 +35,7 @@ XBL/XSTS/MC 체인은 minecraft-launcher-lib(mll) 의 검증된 구현을 재사
 """
 
 import base64
+import contextlib
 import json
 import os
 import sys
@@ -453,13 +454,46 @@ def _refresh(account: dict) -> dict:
     """
     if not account.get("ms_refresh_token"):
         raise AuthError("저장된 로그인 정보가 만료됐습니다. 다시 로그인해주세요.", code="relogin")
-    with _REFRESH_LOCK:
-        current = _load_account()
-        if current and current.get("mc_uuid") == account.get("mc_uuid"):
+    # 스레드 락 + 파일 락: 게임 안 코어가 `--mc-token` 으로 띄운 별도 런처 프로세스도
+    # 같은 refresh_token 을 쓰므로, 프로세스 사이에서도 직렬화해야 한다.
+    with _REFRESH_LOCK, _store_lock():
+        current = _load_store()["accounts"].get(account.get("mc_uuid"))
+        if current:
             if time.time() < current.get("mc_expires_at", 0) - _EXPIRY_MARGIN:
                 return current              # 락 대기 중에 다른 호출이 이미 갱신함
             account = current               # 회전된 최신 토큰으로 진행
         return _refresh_locked(account)
+
+
+@contextlib.contextmanager
+def _store_lock():
+    """프로세스 간 배타 락 (accounts.lock). 갱신 체인이 길어도 2분 안에는 풀린다."""
+    os.makedirs(instance.root_dir(), exist_ok=True)
+    with open(os.path.join(instance.root_dir(), "accounts.lock"), "a+b") as f:
+        if os.name == "nt":
+            import msvcrt
+            for _ in range(12):             # LK_LOCK 은 한 번에 ~10초 재시도 후 실패
+                try:
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+                    break
+                except OSError:
+                    pass
+            else:
+                raise AuthError("다른 곳에서 로그인 갱신 중입니다. 잠시 후 다시 시도해주세요.",
+                                code="network")
+            try:
+                yield
+            finally:
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def _refresh_locked(account: dict) -> dict:
@@ -504,7 +538,8 @@ def _refresh_locked(account: dict) -> dict:
     except AuthError as e:
         _log_auth(f"[인증] xbox 체인 실패 code={e.code}: {e.message.splitlines()[0]}")
         raise
-    _save_account(new_account)
+    # 활성 계정은 바꾸지 않는다 — 게임이 비활성 계정의 토큰을 갱신할 수도 있다.
+    _merge_account(new_account["mc_uuid"], new_account)
     return new_account
 
 
@@ -749,3 +784,16 @@ def get_account(auto_refresh: bool = True) -> dict:
     if not auto_refresh:
         raise AuthError("로그인이 만료됐습니다. 다시 로그인해주세요.", code="relogin")
     return _refresh(acc)
+
+
+def get_token_for(uuid: str) -> str:
+    """특정 계정의 유효한 MC 액세스 토큰 (필요 시 갱신). 활성 계정은 바꾸지 않는다.
+
+    게임 안 코어가 장시간 실행 중 프로필 키를 다시 받을 때 `--mc-token` 으로 부른다.
+    """
+    acc = _load_store()["accounts"].get(uuid.replace("-", ""))
+    if not acc:
+        raise AuthError("저장된 계정을 찾을 수 없습니다.", code="not_found")
+    if time.time() >= acc.get("mc_expires_at", 0) - _EXPIRY_MARGIN:
+        acc = _refresh(acc)
+    return acc["mc_access_token"]

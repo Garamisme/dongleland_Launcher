@@ -145,6 +145,7 @@ if __name__ == "__main__":
     py_rules("원격 허용 모드 정책", "policytest.py", "허용 모드 정책")
     py_rules("WebView2 없는 PC 안내", "webview2test.py", "WebView2 안내")
     py_rules("Fabric·Java 취소", "tasktest.py", "작업 취소")
+    py_rules("게임 창 설정", "windowtest.py", "게임 창")
     contract()
     js_and_dupes()
     suites()

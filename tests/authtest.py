@@ -137,6 +137,16 @@ for t in threads:
 check("동시 호출이 토큰을 한 번만 소비한다 (호출 %d회)" % len(calls), len(calls) == 1)
 check("갱신 결과가 저장됨", stored()["mc_access_token"] == "MC-NEW")
 
+# ── 5b. 게임 토큰 요청(--mc-token): 비활성 계정을 갱신해도 활성 계정은 그대로 ───
+calls.clear()
+check("유효한 토큰은 갱신 없이 그대로", auth.get_token_for("0" * 32) == "MC-NEW" and not calls)
+seed("RT-A")                                         # 계정 0 = 만료
+auth._save_account({"mc_username": "Other", "mc_uuid": "2" * 32, "mc_access_token": "O",
+                    "mc_expires_at": int(time.time()) + 86400,
+                    "ms_refresh_token": "RT-O", "saved_at": 0})   # 활성 = 계정 2
+check("하이픈 섞인 uuid 도 찾아 갱신", auth.get_token_for("00000000-0000-0000-0000-000000000000") == "MC-NEW")
+check("활성 계정은 바뀌지 않음", auth._load_store()["active"] == "2" * 32)
+
 # ── 6. 읽지 못한 저장소를 덮어쓰지 않는다 ─────────────────────────────────
 path = auth.instance.accounts_path()
 with open(path, "wb") as f:

@@ -32,7 +32,8 @@ python3 tests/run_all.py
 ## 자주 밟는 지뢰
 
 - `el.textContent = val`은 안에 있던 SVG 아이콘을 지운다
-- `renderScreen(false)`는 스크롤을 맨 위로 날린다 → `refreshItemInPlace()`
+- `renderScreen(false)`는 같은 탭이면 스크롤을 유지한다(탭 전환은 맨 위). 모달은 `holdModalScroll(root)`
+  로 본문 스크롤을 지킨다. 카드 하나만 바뀌면 여전히 `refreshItemInPlace()`가 더 싸다
 - 프론트 최상위 `const`는 `window` 프로퍼티가 아니다 → 테스트에서 `w.eval('DATA')`
 - `ModRegistry(mods_dir)` — json 경로가 아니라 폴더 경로
 - Modrinth는 대문자 sha1을 거부한다 → 항상 `.lower()`

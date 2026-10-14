@@ -89,7 +89,13 @@ def _core_mod_jvm_args() -> list[str]:
     jar = _core_mod_jar()
     if not jar:
         return []
-    return [f"-javaagent:{jar}", f"-Ddongleland.dir={instance.instance_dir()}"]
+    # 런처 실행 명령: 코어가 장시간 실행 중 `--mc-token` 으로 새 토큰을 받을 때 쓴다.
+    if getattr(sys, "frozen", False):
+        token_cmd = [f"-Ddongleland.launcherExe={sys.executable}"]
+    else:
+        token_cmd = [f"-Ddongleland.launcherExe={sys.executable}",
+                     f"-Ddongleland.launcherScript={os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.py")}"]
+    return [f"-javaagent:{jar}", f"-Ddongleland.dir={instance.instance_dir()}", *token_cmd]
 # ──────────────────────────────────────────────────────────────────────
 
 
@@ -146,8 +152,35 @@ def _java_executable() -> str:
     return java
 
 
+def _set_fullscreen_option(on: bool):
+    """인스턴스 options.txt 의 `fullscreen:` 한 줄만 고친다 (런처 인자로는 전체화면을 못 끈다).
+
+    파일이 없으면 창모드는 이미 바닐라 기본값이라 만들지 않는다. 전체화면일 때만 한 줄짜리로 만든다
+    (나머지 옵션은 게임이 기본값으로 채운다).
+    """
+    path = os.path.join(instance.instance_dir(), "options.txt")
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except FileNotFoundError:
+        if not on:
+            return
+        lines = []
+    line = "fullscreen:" + ("true" if on else "false")
+    idx = next((i for i, l in enumerate(lines) if l.startswith("fullscreen:")), None)
+    if idx is None:
+        lines.append(line)
+    elif lines[idx] == line:
+        return
+    else:
+        lines[idx] = line
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+
+
 def build_command(account: dict, *, quick_connect: bool = True,
-                  max_mem_mb: int = DEFAULT_MAX_MEM_MB) -> list[str]:
+                  max_mem_mb: int = DEFAULT_MAX_MEM_MB,
+                  window: dict | None = None) -> list[str]:
     """실행 커맨드 조립 (실행은 안 함 — 테스트 가능하도록 분리)."""
     # Fabric 프로필로 실행 (다른 Fabric 모드가 로드되도록). 우리 모드는 -javaagent 로만
     # 붙어 모드 목록에는 없다. (build_command 는 순수 함수 — 실행/배치는 launch 에서.)
@@ -169,6 +202,11 @@ def build_command(account: dict, *, quick_connect: bool = True,
     if quick_connect:
         # 도메인만 넘기면 클라이언트가 SRV 해석 (HANDOFF §5.1)
         options["quickPlayMultiplayer"] = app_meta.SERVER_HOST
+    if window and window.get("mode") in ("windowed", "fullscreen"):
+        # 창 크기(전체화면에서 빠져나올 때의 크기이기도 하다). 전체화면 여부는 options.txt 쪽.
+        options["customResolution"] = True
+        options["resolutionWidth"] = str(int(window["width"]))
+        options["resolutionHeight"] = str(int(window["height"]))
 
     return _command.get_minecraft_command(
         version_id, instance.instance_dir(), options)
@@ -179,7 +217,8 @@ _exit_logged = False  # 종료 로그 중복 방지 (프론트가 5초마다 폴
 
 
 def launch(*, quick_connect: bool = True,
-           max_mem_mb: int = DEFAULT_MAX_MEM_MB) -> dict:
+           max_mem_mb: int = DEFAULT_MAX_MEM_MB,
+           window: dict | None = None) -> dict:
     """로그인 계정 확보(자동 갱신 포함) → 커맨드 조립 → 게임 프로세스 실행.
 
     반환: {"ok":True, "pid":int, "version_id":str, "username":str}
@@ -188,7 +227,12 @@ def launch(*, quick_connect: bool = True,
     global _running_proc, _exit_logged
     account = auth.get_account()  # 만료 시 자동 리프레시, 불가 시 AuthError(relogin)
     cmd = build_command(account, quick_connect=quick_connect,
-                        max_mem_mb=max_mem_mb)
+                        max_mem_mb=max_mem_mb, window=window)
+    if window and window.get("mode") in ("windowed", "fullscreen"):
+        try:
+            _set_fullscreen_option(window["mode"] == "fullscreen")
+        except OSError as e:  # 못 고쳐도 실행은 한다 — 창 크기 인자는 이미 들어갔다
+            preflight.write_log(f"[실행] options.txt 전체화면 설정 실패: {e}")
 
     kwargs: dict = {"cwd": instance.instance_dir()}
     if sys.platform == "win32":
