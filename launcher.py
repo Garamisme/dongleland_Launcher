@@ -234,7 +234,11 @@ def launch(*, quick_connect: bool = True,
         except OSError as e:  # 못 고쳐도 실행은 한다 — 창 크기 인자는 이미 들어갔다
             preflight.write_log(f"[실행] options.txt 전체화면 설정 실패: {e}")
 
-    kwargs: dict = {"cwd": instance.instance_dir()}
+    # 코어가 게임 중 이 exe 를 --mc-token 으로 다시 띄운다. onefile 의 _PYI_* 변수가
+    # 게임을 거쳐 그대로 상속되면 새 런처가 (이미 닫혀 지워진) 우리 _MEI 폴더에서
+    # python3xx.dll 을 찾다 죽는다. → 부트로더가 상속 변수를 무시하게 한다.
+    kwargs: dict = {"cwd": instance.instance_dir(),
+                    "env": {**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"}}
     if sys.platform == "win32":
         # 런처와 분리된 독립 프로세스 + 콘솔창 없이
         kwargs["creationflags"] = (
